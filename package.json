@@ -1,0 +1,53 @@
+{
+  "name": "chat-bot-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A desktop chat application with real-time messaging",
+  "author": "Your Name <your.email@example.com>",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -n server,client,electron -c blue,green,magenta \"npm run dev --prefix server\" \"npm run dev --prefix client\" \"npm run dev --prefix electron\"",
+    "build": "npm run build --prefix client && npm run build --prefix server",
+    "start": "electron .",
+    "postinstall": "npm i --prefix server && npm i --prefix client && npm i --prefix electron",
+    "dist": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.chatbot.app",
+    "productName": "Chat Bot",
+    "copyright": "Copyright © 2025",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "dist/icon.png",
+      "verifyUpdateCodeSignature": false,
+      "signAndEditExecutable": false
+    },
+    "extraResources": [
+      {
+        "from": "server",
+        "to": "server",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "files": [
+      "electron/**/*",
+      "client/dist/**/*"
+    ]
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "electron": "^39.2.4",
+    "electron-builder": "^26.0.12",
+    "wait-on": "^7.2.0"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}
