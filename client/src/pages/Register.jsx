@@ -19,6 +19,24 @@ export default function Register() {
     e.preventDefault()
     setError('')
 
+    // Validate password
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long')
+      return
+    }
+    if (!/[A-Z]/.test(password)) {
+      setError('Password must contain at least one uppercase letter')
+      return
+    }
+    if (!/[a-z]/.test(password)) {
+      setError('Password must contain at least one lowercase letter')
+      return
+    }
+    if (!/[0-9]/.test(password)) {
+      setError('Password must contain at least one number')
+      return
+    }
+
     // Validate email domain
     if (!email.endsWith('@xevyte.com')) {
       setError('Email must be from @xevyte.com domain')
@@ -75,7 +93,7 @@ export default function Register() {
             value={password}
             onChange={e => setPassword(e.target.value)}
             className="w-full rounded-xl border-0 bg-sky-50 px-3 py-2"
-            placeholder="Password"
+            placeholder="Password (min 8 chars, A-Z, a-z, 0-9)"
             required
           />
           <button

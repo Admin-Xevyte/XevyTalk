@@ -482,6 +482,50 @@ app.post('/api/conversations/:id/leave', auth, async (req, res) => {
   }
 });
 
+// Add member to group
+app.post('/api/conversations/:id/add-member', auth, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+
+    const conv = await Conversation.findById(req.params.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    // Check if it's a group
+    if (conv.type !== 'group') {
+      return res.status(400).json({ error: 'Can only add members to groups' });
+    }
+
+    // Check if requester is a member
+    if (!conv.members.some(m => String(m) === String(req.user._id))) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    // Check if user is already a member
+    if (conv.members.some(m => String(m) === String(userId))) {
+      return res.status(400).json({ error: 'User is already a member' });
+    }
+
+    // Add user to members
+    conv.members.push(userId);
+    await conv.save();
+
+    // Notify all members including the new one
+    const populated = await Conversation.findById(conv._id).populate('members');
+    populated.members.forEach(memberId => {
+      io.to(`user:${memberId._id}`).emit('member_added', {
+        conversationId: req.params.id,
+        userId,
+        conversation: populated
+      });
+    });
+
+    res.json({ success: true, conversation: populated });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.delete('/api/messages/:id', auth, async (req, res) => {
   try {
     const msg = await Message.findById(req.params.id);

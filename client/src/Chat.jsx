@@ -260,7 +260,49 @@ function MembersModal({ conv, onClose }) {
           </div>
         )}
 
-        <div className="mt-6 pt-4 border-t">
+        <div className="mt-6 pt-4 border-t space-y-2">
+          <button
+            onClick={() => {
+              // Open add member modal
+              const newMemberEmail = prompt('Enter email of user to add:')
+              if (!newMemberEmail) return
+
+              fetch(`${API}/api/users`)
+                .then(r => r.json())
+                .then(users => {
+                  const userToAdd = users.find(u => u.email === newMemberEmail)
+                  if (!userToAdd) {
+                    alert('User not found')
+                    return
+                  }
+
+                  // Add member to group
+                  return fetch(`${API}/api/conversations/${conv._id}/add-member`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ userId: userToAdd._id })
+                  })
+                })
+                .then(r => r && r.json())
+                .then(data => {
+                  if (data && data.success) {
+                    alert('Member added successfully!')
+                    // Refresh members
+                    window.location.reload()
+                  }
+                })
+                .catch(err => {
+                  console.error(err)
+                  alert('Failed to add member')
+                })
+            }}
+            className="w-full bg-green-500 text-white py-2 px-4 rounded-lg hover:bg-green-600 transition-colors"
+          >
+            + Add New User
+          </button>
           <button
             onClick={onClose}
             className="w-full bg-primary text-white py-2 px-4 rounded-lg hover:bg-primary/90 transition-colors"
