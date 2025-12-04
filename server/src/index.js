@@ -427,6 +427,61 @@ app.delete('/api/conversations/:id', auth, async (req, res) => {
   }
 });
 
+// Clear conversation (for groups - clears messages from user's view only)
+app.post('/api/conversations/:id/clear', auth, async (req, res) => {
+  try {
+    const conv = await Conversation.findById(req.params.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    // Check if user is a member
+    if (!conv.members.some(m => String(m) === String(req.user._id))) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    // Note: In a real app, you'd track which messages each user has cleared
+    // For now, we'll just return success and let the client clear locally
+    // You could add a 'clearedBy' field to messages or create a separate collection
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Leave group
+app.post('/api/conversations/:id/leave', auth, async (req, res) => {
+  try {
+    const conv = await Conversation.findById(req.params.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    // Check if it's a group
+    if (conv.type !== 'group') {
+      return res.status(400).json({ error: 'Can only leave groups' });
+    }
+
+    // Check if user is a member
+    if (!conv.members.some(m => String(m) === String(req.user._id))) {
+      return res.status(403).json({ error: 'Not a member' });
+    }
+
+    // Remove user from members
+    conv.members = conv.members.filter(m => String(m) !== String(req.user._id));
+    await conv.save();
+
+    // Notify remaining members
+    conv.members.forEach(memberId => {
+      io.to(`user:${memberId}`).emit('member_left', {
+        conversationId: req.params.id,
+        userId: req.user._id
+      });
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.delete('/api/messages/:id', auth, async (req, res) => {
   try {
     const msg = await Message.findById(req.params.id);

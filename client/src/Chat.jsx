@@ -1664,7 +1664,7 @@ function LeftPanel({ user, conversations, activeId, onPick, onNew }) {
 }
 
 function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, refreshMessages, onStartCall, selectedMessage, setSelectedMessage }) {
-  const { activeId, messages, pushMessage, token, conversations, setConversations, setActiveId } = useStore()
+  const { activeId, messages, pushMessage, token, conversations, setConversations, setActiveId, setMessages } = useStore()
   const [text, setText] = useState('')
   const [showEmoji, setShowEmoji] = useState(false)
   const [showCallMenu, setShowCallMenu] = useState(false)
@@ -1880,28 +1880,77 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                   <span>⋯</span>
                 </button>
                 {showOptionsMenu && (
-                  <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border text-sm z-10">
-                    <button
-                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 text-red-600 text-left"
-                      onClick={async () => {
-                        if (!confirm('Delete this conversation? This cannot be undone.')) return
-                        try {
-                          await fetch(`${API}/api/conversations/${activeId}`, {
-                            method: 'DELETE',
-                            headers: { Authorization: `Bearer ${token}` }
-                          })
-                          setConversations(cs => cs.filter(c => c._id !== activeId))
-                          setActiveId(null)
-                          setShowOptionsMenu(false)
-                        } catch (e) {
-                          console.error(e)
-                          alert('Failed to delete conversation')
-                        }
-                      }}
-                    >
-                      <span className="text-base">🗑️</span>
-                      <span>Delete Conversation</span>
-                    </button>
+                  <div className="absolute right-0 mt-1 w-52 bg-white rounded-xl shadow-lg border text-sm z-10">
+                    {conv?.type === 'direct' ? (
+                      // Direct conversation: Delete for both users
+                      <button
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 text-red-600 text-left rounded-xl"
+                        onClick={async () => {
+                          if (!confirm('Delete this conversation? This will delete it for both users and cannot be undone.')) return
+                          try {
+                            await fetch(`${API}/api/conversations/${activeId}`, {
+                              method: 'DELETE',
+                              headers: { Authorization: `Bearer ${token}` }
+                            })
+                            setConversations(cs => cs.filter(c => c._id !== activeId))
+                            setActiveId(null)
+                            setShowOptionsMenu(false)
+                          } catch (e) {
+                            console.error(e)
+                            alert('Failed to delete conversation')
+                          }
+                        }}
+                      >
+                        <span className="text-base">🗑️</span>
+                        <span>Delete Conversation</span>
+                      </button>
+                    ) : (
+                      // Group conversation: Clear messages + Leave group
+                      <>
+                        <button
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                          onClick={async () => {
+                            if (!confirm('Clear all messages in this group? This will only clear messages from your view.')) return
+                            try {
+                              await fetch(`${API}/api/conversations/${activeId}/clear`, {
+                                method: 'POST',
+                                headers: { Authorization: `Bearer ${token}` }
+                              })
+                              // Clear messages locally
+                              setMessages(activeId, [])
+                              setShowOptionsMenu(false)
+                            } catch (e) {
+                              console.error(e)
+                              alert('Failed to clear messages')
+                            }
+                          }}
+                        >
+                          <span className="text-base">🧹</span>
+                          <span>Clear Conversation</span>
+                        </button>
+                        <button
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 text-red-600 text-left rounded-b-xl"
+                          onClick={async () => {
+                            if (!confirm('Leave this group? The group will be removed from your chat list.')) return
+                            try {
+                              await fetch(`${API}/api/conversations/${activeId}/leave`, {
+                                method: 'POST',
+                                headers: { Authorization: `Bearer ${token}` }
+                              })
+                              setConversations(cs => cs.filter(c => c._id !== activeId))
+                              setActiveId(null)
+                              setShowOptionsMenu(false)
+                            } catch (e) {
+                              console.error(e)
+                              alert('Failed to leave group')
+                            }
+                          }}
+                        >
+                          <span className="text-base">🚪</span>
+                          <span>Leave Group</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
