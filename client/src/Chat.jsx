@@ -1868,9 +1868,6 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
               >
                 🔄
               </button>
-              {conv?.type === 'group' && (
-                <button title="Group Info" className="p-2 rounded-lg hover:bg-gray-100" onClick={() => setShowMembers(true)}>ℹ️</button>
-              )}
               <div className="relative">
                 <button
                   title="Options"
@@ -1905,8 +1902,18 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                         <span>Delete Conversation</span>
                       </button>
                     ) : (
-                      // Group conversation: Clear messages + Leave group
+                      // Group conversation: Members + Clear + Leave
                       <>
+                        <button
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left rounded-t-xl"
+                          onClick={() => {
+                            setShowMembers(true)
+                            setShowOptionsMenu(false)
+                          }}
+                        >
+                          <span className="text-base">👥</span>
+                          <span>Group Members</span>
+                        </button>
                         <button
                           className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
                           onClick={async () => {
