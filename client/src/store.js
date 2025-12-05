@@ -47,8 +47,8 @@ export const useStore = create((set, get) => ({
   unreadCounts: {},
   incrementUnread: (convId) => set((s) => ({
     unreadCounts: {
-      ...s.unreadCounts,
-      [convId]: (s.unreadCounts?.[convId] || 0) + 1,
+      ...(s.unreadCounts || {}),
+      [convId]: ((s.unreadCounts || {})[convId] || 0) + 1,
     },
   })),
   clearUnread: (convId) => set((s) => {

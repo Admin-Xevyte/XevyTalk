@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 
@@ -15,24 +15,34 @@ export default function Register() {
   const [loading, setLoading] = useState(false)
   const [ok, setOk] = useState(false)
 
+  // Password validation checks
+  const passwordChecks = useMemo(() => ({
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /[0-9]/.test(password)
+  }), [password])
+
+  const allPasswordChecksPassed = Object.values(passwordChecks).every(Boolean)
+
   const submit = async (e) => {
     e.preventDefault()
     setError('')
 
     // Validate password
-    if (password.length < 8) {
+    if (!passwordChecks.length) {
       setError('Password must be at least 8 characters long')
       return
     }
-    if (!/[A-Z]/.test(password)) {
+    if (!passwordChecks.uppercase) {
       setError('Password must contain at least one uppercase letter')
       return
     }
-    if (!/[a-z]/.test(password)) {
+    if (!passwordChecks.lowercase) {
       setError('Password must contain at least one lowercase letter')
       return
     }
-    if (!/[0-9]/.test(password)) {
+    if (!passwordChecks.number) {
       setError('Password must contain at least one number')
       return
     }
@@ -93,9 +103,43 @@ export default function Register() {
             value={password}
             onChange={e => setPassword(e.target.value)}
             className="w-full rounded-xl border-0 bg-sky-50 px-3 py-2"
-            placeholder="Password (min 8 chars, A-Z, a-z, 0-9)"
+            placeholder="Password"
             required
           />
+
+          {/* Password validation timeline */}
+          {password && (
+            <div className="bg-sky-50 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-medium text-gray-600 mb-2">Password Requirements:</div>
+              <div className="space-y-1.5">
+                <div className={`flex items-center gap-2 text-xs ${passwordChecks.length ? 'text-green-600' : 'text-gray-500'}`}>
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center ${passwordChecks.length ? 'bg-green-500' : 'bg-gray-300'}`}>
+                    {passwordChecks.length ? '✓' : '○'}
+                  </span>
+                  <span>At least 8 characters</span>
+                </div>
+                <div className={`flex items-center gap-2 text-xs ${passwordChecks.uppercase ? 'text-green-600' : 'text-gray-500'}`}>
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center ${passwordChecks.uppercase ? 'bg-green-500' : 'bg-gray-300'}`}>
+                    {passwordChecks.uppercase ? '✓' : '○'}
+                  </span>
+                  <span>One uppercase letter (A-Z)</span>
+                </div>
+                <div className={`flex items-center gap-2 text-xs ${passwordChecks.lowercase ? 'text-green-600' : 'text-gray-500'}`}>
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center ${passwordChecks.lowercase ? 'bg-green-500' : 'bg-gray-300'}`}>
+                    {passwordChecks.lowercase ? '✓' : '○'}
+                  </span>
+                  <span>One lowercase letter (a-z)</span>
+                </div>
+                <div className={`flex items-center gap-2 text-xs ${passwordChecks.number ? 'text-green-600' : 'text-gray-500'}`}>
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center ${passwordChecks.number ? 'bg-green-500' : 'bg-gray-300'}`}>
+                    {passwordChecks.number ? '✓' : '○'}
+                  </span>
+                  <span>One number (0-9)</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
             disabled={loading}
             className="w-full bg-primary text-white rounded-xl py-2 disabled:opacity-50"

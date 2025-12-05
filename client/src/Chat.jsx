@@ -6,6 +6,7 @@ import { useStore } from './store'
 import { createSocket } from './socket'
 import NewChatModal from './NewChatModal'
 import CallPage from './CallPage'
+import AddMemberModal from './AddMemberModal'
 import { useNavigate } from 'react-router-dom'
 import { generateKey, exportKey, importKey, encryptMessage, decryptMessage, isEncrypted } from './crypto'
 
@@ -144,42 +145,45 @@ function MembersModal({ conv, onClose }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [members, setMembers] = useState([])
-  const { token } = useStore()
+  const [showAddMember, setShowAddMember] = useState(false)
+  const { token, user } = useStore()
+
+  const fetchMembers = async () => {
+    if (!conv?._id) return
+
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Fetch fresh conversation data to ensure we have the latest members
+      const r = await fetch(`${API}/api/conversations/${conv._id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (!r.ok) {
+        throw new Error('Failed to fetch group members')
+      }
+
+      const data = await r.json()
+      if (data.members && Array.isArray(data.members)) {
+        setMembers(data.members)
+      } else {
+        setMembers(conv.members || [])
+      }
+    } catch (err) {
+      console.error('Error fetching members:', err)
+      setError(err.message || 'Failed to load group members')
+      setMembers(conv.members || [])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const fetchMembers = async () => {
-      if (!conv?._id) return
-
-      try {
-        setLoading(true)
-        setError(null)
-
-        // Fetch fresh conversation data to ensure we have the latest members
-        const r = await fetch(`${API}/api/conversations/${conv._id}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-
-        if (!r.ok) {
-          throw new Error('Failed to fetch group members')
-        }
-
-        const data = await r.json()
-        if (data.members && Array.isArray(data.members)) {
-          setMembers(data.members)
-        } else {
-          setMembers(conv.members || [])
-        }
-      } catch (err) {
-        console.error('Error fetching members:', err)
-        setError(err.message || 'Failed to load group members')
-        setMembers(conv.members || [])
-      } finally {
-        setLoading(false)
-      }
-    }
-
     fetchMembers()
   }, [conv?._id, token])
+
+  const isAdmin = members.length > 0 && String(members[0]._id) === String(user?._id)
 
   if (!conv) {
     return (
@@ -202,116 +206,146 @@ function MembersModal({ conv, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="w-[90%] max-w-md bg-white rounded-2xl shadow-xl p-6" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="font-semibold text-lg">Group Members</div>
-            <div className="text-xs text-gray-500">{conv.name || 'Group Chat'}</div>
+    <>
+      <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
+        <div className="w-[90%] max-w-md bg-white rounded-2xl shadow-xl p-6" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="font-semibold text-lg">Group Members</div>
+              <div className="text-xs text-gray-500">{conv.name || 'Group Chat'}</div>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-700 p-1 -mr-1"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 p-1 -mr-1"
-            aria-label="Close"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
 
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-          </div>
-        ) : error ? (
-          <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm mb-4">
-            {error}
-          </div>
-        ) : members.length === 0 ? (
-          <div className="text-center py-6 text-gray-500">
-            No members in this group
-          </div>
-        ) : (
-          <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2 -mr-2">
-            {members.map(member => (
-              <div
-                key={member._id}
-                className="flex items-center gap-3 bg-sky-50/60 hover:bg-sky-100/60 rounded-xl p-3 transition-colors"
-              >
-                <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 grid place-items-center font-semibold text-lg flex-shrink-0">
-                  {member.username?.charAt(0)?.toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <div className="font-medium text-sm truncate">
-                    {member.username}
-                    {member._id === conv.members[0]?._id && (
-                      <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                        Admin
-                      </span>
-                    )}
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+            </div>
+          ) : error ? (
+            <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm mb-4">
+              {error}
+            </div>
+          ) : members.length === 0 ? (
+            <div className="text-center py-6 text-gray-500">
+              No members in this group
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2 -mr-2">
+              {members.map(member => (
+                <div
+                  key={member._id}
+                  className="flex items-center gap-3 bg-sky-50/60 hover:bg-sky-100/60 rounded-xl p-3 transition-colors group"
+                >
+                  <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 grid place-items-center font-semibold text-lg flex-shrink-0">
+                    {member.username?.charAt(0)?.toUpperCase()}
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {member.email || 'No email'}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-sm truncate">
+                      {member.username}
+                      {member._id === conv.members[0]?._id && (
+                        <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                          Admin
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {member.email || 'No email'}
+                    </div>
                   </div>
+
+                  {isAdmin && String(member._id) !== String(user?._id) && (
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        if (!confirm(`Remove ${member.username} from group?`)) return
+                        try {
+                          // First verify the conversation exists and user is admin
+                          const verifyRes = await fetch(`${API}/api/conversations/${conv._id}`, {
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+
+                          if (!verifyRes.ok) {
+                            throw new Error(verifyRes.status === 404 ? 'Conversation not found' : 'Failed to verify conversation');
+                          }
+
+                          const convData = await verifyRes.json();
+                          const isAdmin = convData.members.length > 0 && String(convData.members[0]._id) === String(user?._id);
+
+                          if (!isAdmin) {
+                            throw new Error('Only group admin can remove members');
+                          }
+
+                          // Now make the remove member request
+                          const r = await fetch(`${API}/api/conversations/${conv._id}/remove-member`, {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              Authorization: `Bearer ${token}`
+                            },
+                            body: JSON.stringify({ userId: member._id })
+                          });
+
+                          const responseData = await r.json().catch(() => ({}));
+
+                          if (r.ok) {
+                            fetchMembers(); // Refresh list
+                          } else {
+                            throw new Error(responseData.error || `Failed to remove member: ${r.status} ${r.statusText}`);
+                          }
+                        } catch (err) {
+                          console.error('Remove member error:', err);
+                          alert(`Error removing member: ${err.message}`);
+                        }
+                      }}
+                      className="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+          )}
+
+          <div className="mt-6 pt-4 border-t space-y-2">
+            <button
+              onClick={() => setShowAddMember(true)}
+              className="w-full bg-green-500 text-white py-2 px-4 rounded-lg hover:bg-green-600 transition-colors"
+            >
+              + Add New User
+            </button>
+            <button
+              onClick={onClose}
+              className="w-full bg-primary text-white py-2 px-4 rounded-lg hover:bg-primary/90 transition-colors"
+            >
+              Close
+            </button>
           </div>
-        )}
-
-        <div className="mt-6 pt-4 border-t space-y-2">
-          <button
-            onClick={() => {
-              // Open add member modal
-              const newMemberEmail = prompt('Enter email of user to add:')
-              if (!newMemberEmail) return
-
-              fetch(`${API}/api/users`)
-                .then(r => r.json())
-                .then(users => {
-                  const userToAdd = users.find(u => u.email === newMemberEmail)
-                  if (!userToAdd) {
-                    alert('User not found')
-                    return
-                  }
-
-                  // Add member to group
-                  return fetch(`${API}/api/conversations/${conv._id}/add-member`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      Authorization: `Bearer ${token}`
-                    },
-                    body: JSON.stringify({ userId: userToAdd._id })
-                  })
-                })
-                .then(r => r && r.json())
-                .then(data => {
-                  if (data && data.success) {
-                    alert('Member added successfully!')
-                    // Refresh members
-                    window.location.reload()
-                  }
-                })
-                .catch(err => {
-                  console.error(err)
-                  alert('Failed to add member')
-                })
-            }}
-            className="w-full bg-green-500 text-white py-2 px-4 rounded-lg hover:bg-green-600 transition-colors"
-          >
-            + Add New User
-          </button>
-          <button
-            onClick={onClose}
-            className="w-full bg-primary text-white py-2 px-4 rounded-lg hover:bg-primary/90 transition-colors"
-          >
-            Close
-          </button>
         </div>
       </div>
-    </div>
+
+      {showAddMember && (
+        <AddMemberModal
+          conversationId={conv._id}
+          token={token}
+          existingMembers={members}
+          onClose={() => setShowAddMember(false)}
+          onSuccess={() => {
+            fetchMembers()
+            // Optional: Show a toast or alert
+            alert('Member added successfully!')
+          }}
+        />
+      )}
+    </>
   )
 }
 
@@ -524,7 +558,7 @@ export default function Chat() {
       socketRef.current = s
 
       s.on('message_new', (msg) => {
-        const convId = String(msg.conversation)
+        const convId = String(msg.conversation?._id || msg.conversation)
         const state = useStore.getState()
         const myId = state.user?._id ? String(state.user._id) : ''
         const senderId = String(msg.sender?._id || msg.sender)
@@ -535,14 +569,39 @@ export default function Chat() {
           pushMessage(convId, msg)
         }
 
+        // Check if conversation exists in state, if not fetch it (it might have been hidden/deleted)
+        const conversationExists = state.conversations.some(c => c._id === convId)
+        if (!conversationExists) {
+          fetch(`${API}/api/conversations/${convId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+            .then(r => r.ok ? r.json() : null)
+            .then(newConv => {
+              if (newConv) {
+                setConversations(prev => {
+                  // Double check to avoid duplicates
+                  if (prev.find(c => c._id === newConv._id)) return prev
+                  return [newConv, ...prev]
+                })
+                // Join the room if not already joined (though socket.on('conversation_created') handles this usually, 
+                // but for reappearing chats we might need it)
+                s.emit('join_conversation', convId)
+              }
+            })
+            .catch(console.error)
+        }
+
         // Update lastMessageAt so lists can sort by recent activity
         setConversations(cs => cs.map(c => c._id === convId ? { ...c, lastMessageAt: msg.createdAt || c.lastMessageAt || new Date().toISOString() } : c))
 
         const isFromMe = senderId === myId
         const isActive = String(state.activeId || '') === convId
 
+        console.log('message_new', msg._id, 'conv:', convId, 'fromMe:', isFromMe, 'active:', isActive)
+
         // Increment unread count if message is not from me and conversation is not active
         if (!isFromMe && !isActive) {
+          console.log('Incrementing unread for', convId)
           state.incrementUnread?.(convId)
           const conv = (state.conversations || []).find(c => String(c._id) === convId)
           const other = conv?.type === 'group'
@@ -568,6 +627,7 @@ export default function Chat() {
         }
       })
       s.on('message_update', ({ messageId, deliveredTo, seenBy }) => {
+        console.log('message_update', messageId, deliveredTo?.length, seenBy?.length)
         const state = useStore.getState()
         const convId = Object.keys(state.messages).find(cid => (state.messages[cid] || []).some(m => m._id === messageId))
         if (convId) state.updateMessage(convId, messageId, { deliveredTo, seenBy })
@@ -835,7 +895,16 @@ export default function Chat() {
         const cs = await res.json()
         const filtered = cs.filter(c => !(c.type === 'group' && String(c.name || '').trim().toLowerCase() === 'lobby'))
         setConversations(filtered)
-        filtered.forEach(c => s.emit('join_conversation', c._id))
+
+        // Initialize unread counts
+        const unreadMap = {}
+        filtered.forEach(c => {
+          if (c.unreadCount > 0) {
+            unreadMap[c._id] = c.unreadCount
+          }
+          s.emit('join_conversation', c._id)
+        })
+        useStore.setState({ unreadCounts: unreadMap })
         setActiveId(null)
       } catch (e) {
         console.error('Failed to load conversations', e)
@@ -1674,24 +1743,38 @@ function LeftPanel({ user, conversations, activeId, onPick, onNew }) {
             const unread = (unreadCounts || {})[c._id] || 0
 
             return (
-              <button key={c._id} onClick={() => onPick(c._id)} className={`w-full text-left bg-white rounded-xl px-3 py-2 shadow-soft hover:shadow ${activeId === c._id ? 'ring-2 ring-primary/50' : ''}`}>
+              <button
+                key={c._id}
+                onClick={() => onPick(c._id)}
+                className={`w-full text-left rounded-xl px-3 py-3 transition-all ${activeId === c._id
+                  ? 'bg-primary/10 shadow-md ring-2 ring-primary/30'
+                  : unread > 0
+                    ? 'bg-white shadow-soft-dark hover:shadow-md'
+                    : 'bg-white shadow-soft hover:shadow'
+                  }`}
+              >
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 grid place-items-center font-semibold">
+                  <div className={`w-10 h-10 rounded-full grid place-items-center font-semibold text-sm ${unread > 0
+                    ? 'bg-primary text-white'
+                    : 'bg-indigo-100 text-indigo-700'
+                    }`}>
                     {c.type === 'group' ? (c.name?.charAt(0) || 'G') : (other?.username?.charAt(0) || 'D')}
                   </div>
                   <div className="flex-1 flex items-center justify-between">
-                    <div>
-                      <div className="font-medium text-sm">{c.type === 'group' ? c.name : (other?.username || 'Direct')}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm truncate ${unread > 0 ? 'font-bold text-gray-900' : 'font-medium text-gray-700'}`}>
+                        {c.type === 'group' ? c.name : (other?.username || 'Direct')}
+                      </div>
                       {c.type !== 'group' && isOnline && (
-                        <div className="text-[10px] text-green-600 flex items-center gap-1">
+                        <div className="text-[10px] text-green-600 flex items-center gap-1 mt-0.5">
                           <span className="w-1.5 h-1.5 bg-green-600 rounded-full"></span>
                           <span>Online</span>
                         </div>
                       )}
                     </div>
                     {unread > 0 && (
-                      <div className="ml-2 min-w-[18px] px-1 py-0.5 rounded-full bg-red-500 text-white text-[10px] text-center">
-                        {unread > 9 ? '9+' : unread}
+                      <div className="ml-2 min-w-[20px] h-5 px-2 flex items-center justify-center rounded-full bg-primary text-white text-xs font-bold shadow-sm">
+                        {unread > 99 ? '99+' : unread}
                       </div>
                     )}
                   </div>
@@ -1825,41 +1908,96 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
               <div className="font-semibold text-sm">1 selected</div>
             </div>
             <div className="flex items-center gap-3">
-              <button onClick={() => { setInfoMsg(selectedMessage); setSelectedMessage(null) }} className="p-2 hover:bg-gray-100 rounded-lg" title="Info">ℹ️</button>
               {String(selectedMessage.sender?._id || selectedMessage.sender) === String(user._id) && (
-                <button
-                  onClick={async () => {
-                    if (!confirm('Delete this message?')) return
-                    try {
-                      await fetch(`${API}/api/messages/${selectedMessage._id}`, {
-                        method: 'DELETE',
-                        headers: { Authorization: `Bearer ${token}` }
-                      })
-                      setSelectedMessage(null)
-                    } catch (e) {
-                      console.error(e)
-                      alert('Failed to delete')
-                    }
-                  }}
-                  className="p-2 hover:bg-red-50 text-red-600 rounded-lg"
-                  title="Delete"
-                >
-                  🗑️
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowOptionsMenu(v => !v)}
+                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    title="Options"
+                  >
+                    ⋯
+                  </button>
+                  {showOptionsMenu && (
+                    <div className="absolute right-0 mt-1 w-52 bg-white rounded-xl shadow-lg border text-sm z-10">
+                      <button
+                        onClick={() => {
+                          setInfoMsg(selectedMessage);
+                          setSelectedMessage(null);
+                          setShowOptionsMenu(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left rounded-t-xl"
+                      >
+                        <span>ℹ️</span>
+                        <span>Info</span>
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm('Delete this message for yourself?')) return
+                          try {
+                            await fetch(`${API}/api/messages/${selectedMessage._id}`, {
+                              method: 'DELETE',
+                              headers: { Authorization: `Bearer ${token}` }
+                            })
+                            const convId = String(selectedMessage.conversation?._id || selectedMessage.conversation)
+                            removeMessage(convId, selectedMessage._id)
+                            setSelectedMessage(null)
+                            setShowOptionsMenu(false)
+                          } catch (e) {
+                            console.error(e)
+                            alert('Failed to delete')
+                          }
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                      >
+                        <span>🗑️</span>
+                        <span>Delete for Me</span>
+                      </button>
+                      {!(selectedMessage.seenBy || []).some(userId => String(userId) !== String(user._id)) && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm('Delete this message for everyone?')) return
+                            try {
+                              await fetch(`${API}/api/messages/${selectedMessage._id}`, {
+                                method: 'DELETE',
+                                headers: { Authorization: `Bearer ${token}` }
+                              })
+                              const convId = String(selectedMessage.conversation?._id || selectedMessage.conversation)
+                              removeMessage(convId, selectedMessage._id)
+                              setSelectedMessage(null)
+                              setShowOptionsMenu(false)
+                            } catch (e) {
+                              console.error(e)
+                              alert('Failed to delete')
+                            }
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 text-red-600 text-left rounded-b-xl"
+                        >
+                          <span>🗑️</span>
+                          <span>Delete for Everyone</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </>
         ) : (
           <>
             <div>
-              <div className="font-semibold">{conv?.type === 'group' ? (conv?.name || 'Group') : (other?.username || 'Conversation')}</div>
+              <div className="font-bold text-lg text-gray-900">{conv?.type === 'group' ? (conv?.name || 'Group') : (other?.username || 'Conversation')}</div>
+              {conv?.type === 'group' && conv?.members && (
+                <div className="text-xs text-gray-500">
+                  {conv.members.length} members
+                </div>
+              )}
               {other && (
                 <div className="text-xs flex items-center gap-1">
                   {/* Show online if last seen within 5 minutes */}
                   {other.lastSeenAt && dayjs().diff(dayjs(other.lastSeenAt), 'minute') < 5 ? (
                     <>
                       <span className="w-2 h-2 bg-green-600 rounded-full"></span>
-                      <span className="text-green-600">Online</span>
+                      <span className="text-green-600 font-medium">Online</span>
                     </>
                   ) : (
                     <span className="text-gray-500">
@@ -1921,14 +2059,14 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                 {showOptionsMenu && (
                   <div className="absolute right-0 mt-1 w-52 bg-white rounded-xl shadow-lg border text-sm z-10">
                     {conv?.type === 'direct' ? (
-                      // Direct conversation: Delete for both users
+                      // Direct conversation: Delete for current user only
                       <button
                         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 text-red-600 text-left rounded-xl"
                         onClick={async () => {
-                          if (!confirm('Delete this conversation? This will delete it for both users and cannot be undone.')) return
+                          if (!confirm('Delete this conversation? This will only remove it from your chat list.')) return
                           try {
-                            await fetch(`${API}/api/conversations/${activeId}`, {
-                              method: 'DELETE',
+                            await fetch(`${API}/api/conversations/${activeId}/leave`, {
+                              method: 'POST',
                               headers: { Authorization: `Bearer ${token}` }
                             })
                             setConversations(cs => cs.filter(c => c._id !== activeId))
@@ -2007,20 +2145,51 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
           </>
         )}
       </div>
-      <div ref={listRef} className="flex-1 overflow-y-auto p-6 space-y-3 bg-sky-50/40">
+      <div
+        ref={listRef}
+        className="flex-1 overflow-y-auto p-6 space-y-3 relative bg-gradient-to-br from-surface via-white to-surface-dark"
+        onScroll={(e) => {
+          // Find the current visible date while scrolling
+          const scrollTop = e.target.scrollTop
+          const messages = convMessages.filter(m => m.content || (m.attachments && m.attachments.length > 0))
+
+          // Simple logic: show the date of the first message in view
+          if (messages.length > 0) {
+            const firstVisibleDate = dayjs(messages[0].createdAt).format('DD-MM-YYYY')
+            // You can add state here to show sticky date if needed
+          }
+        }}
+      >
         {convMessages.length === 0 && null}
-        {convMessages.map(m => (
-          <MessageBubble
-            key={m._id}
-            me={user._id}
-            m={m}
-            totalMembers={membersCount}
-            conv={conv}
-            onInfo={() => setInfoMsg(m)}
-            selected={selectedMessage?._id === m._id}
-            onSelect={() => setSelectedMessage(selectedMessage?._id === m._id ? null : m)}
-          />
-        ))}
+        {convMessages
+          .filter(m => m.content || (m.attachments && m.attachments.length > 0))
+          .map((m, index, arr) => {
+            // Check if we need to show a date stamp
+            const currentDate = dayjs(m.createdAt).format('DD-MM-YYYY')
+            const prevDate = index > 0 ? dayjs(arr[index - 1].createdAt).format('DD-MM-YYYY') : null
+            const showDateStamp = index === 0 || currentDate !== prevDate
+
+            return (
+              <React.Fragment key={m._id}>
+                {showDateStamp && (
+                  <div className="flex justify-center my-4 sticky top-2 z-10">
+                    <div className="bg-white/90 backdrop-blur-md px-4 py-1.5 rounded-full shadow-md text-xs font-medium text-gray-700 border border-gray-200">
+                      {currentDate}
+                    </div>
+                  </div>
+                )}
+                <MessageBubble
+                  me={user._id}
+                  m={m}
+                  totalMembers={membersCount}
+                  conv={conv}
+                  onInfo={() => setInfoMsg(m)}
+                  selected={selectedMessage?._id === m._id}
+                  onSelect={() => setSelectedMessage(selectedMessage?._id === m._id ? null : m)}
+                />
+              </React.Fragment>
+            )
+          })}
         {isTyping && <div className="text-xs text-gray-500">Typing...</div>}
       </div>
       <div className="p-4 border-t bg-white">
@@ -2046,6 +2215,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
 function MessageBubble({ m, me, totalMembers, conv, onInfo, selected, onSelect }) {
   const mine = String(m.sender?._id || m.sender) === String(me)
   const senderName = m.sender?.username || (conv?.members || []).find(x => String(x._id) === String(m.sender))?.username || (mine ? 'You' : 'User')
+
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
       <div

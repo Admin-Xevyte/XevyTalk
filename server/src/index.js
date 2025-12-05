@@ -142,7 +142,8 @@ const conversationSchema = new mongoose.Schema({
   type: { type: String, enum: ['direct', 'group'], required: true },
   name: { type: String },
   members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  lastMessageAt: { type: Date, default: Date.now }
+  lastMessageAt: { type: Date, default: Date.now },
+  hiddenFor: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
 }, { timestamps: true });
 
 const messageSchema = new mongoose.Schema({
@@ -320,12 +321,25 @@ app.put('/api/users/me', auth, async (req, res) => {
 });
 
 app.get('/api/conversations', auth, async (req, res) => {
-  let list = await Conversation.find({ members: req.user._id })
+  let list = await Conversation.find({
+    members: req.user._id,
+    hiddenFor: { $ne: req.user._id }
+  })
     .sort({ updatedAt: -1 })
     .populate('members')
     .limit(50);
-  list = list.filter(c => !(c.type === 'group' && (String(c.name || '').trim().toLowerCase() === 'lobby')))
-  res.json(list);
+
+  const listWithUnread = await Promise.all(list.map(async (conv) => {
+    const unreadCount = await Message.countDocuments({
+      conversation: conv._id,
+      sender: { $ne: req.user._id },
+      seenBy: { $ne: req.user._id }
+    });
+    return { ...conv.toObject(), unreadCount };
+  }));
+
+  const final = listWithUnread.filter(c => !(c.type === 'group' && (String(c.name || '').trim().toLowerCase() === 'lobby')));
+  res.json(final);
 });
 
 app.get('/api/conversations/:id', auth, async (req, res) => {
@@ -354,6 +368,14 @@ app.post('/api/conversations/direct', auth, async (req, res) => {
     conv = new Conversation({ type: 'direct', members: [req.user._id, userId] });
     await conv.save();
     isNew = true;
+  } else {
+    // If conversation exists but is hidden for current user, unhide it
+    if (conv.hiddenFor && conv.hiddenFor.includes(req.user._id)) {
+      conv.hiddenFor = conv.hiddenFor.filter(id => String(id) !== String(req.user._id));
+      await conv.save();
+      // Treat as new for the user since it's reappearing
+      // But we don't need to notify the other user if they already see it
+    }
   }
   const populated = await Conversation.findById(conv._id).populate('members');
 
@@ -397,7 +419,9 @@ app.get('/api/messages/:conversationId', auth, async (req, res) => {
     .populate('sender');
   // Decrypt content if needed before sending to client
   const safe = m.map(toSafeMessage);
-  res.json(safe);
+  // Filter out messages with no content and no attachments
+  const filtered = safe.filter(msg => msg.content || (msg.attachments && msg.attachments.length > 0));
+  res.json(filtered);
 });
 
 app.delete('/api/conversations/:id', auth, async (req, res) => {
@@ -448,33 +472,36 @@ app.post('/api/conversations/:id/clear', auth, async (req, res) => {
   }
 });
 
-// Leave group
+// Leave group or remove direct conversation
 app.post('/api/conversations/:id/leave', auth, async (req, res) => {
   try {
     const conv = await Conversation.findById(req.params.id);
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
-
-    // Check if it's a group
-    if (conv.type !== 'group') {
-      return res.status(400).json({ error: 'Can only leave groups' });
-    }
 
     // Check if user is a member
     if (!conv.members.some(m => String(m) === String(req.user._id))) {
       return res.status(403).json({ error: 'Not a member' });
     }
 
-    // Remove user from members
-    conv.members = conv.members.filter(m => String(m) !== String(req.user._id));
-    await conv.save();
+    if (conv.type === 'group') {
+      // For groups: Remove user from members
+      conv.members = conv.members.filter(m => String(m) !== String(req.user._id));
+      await conv.save();
 
-    // Notify remaining members
-    conv.members.forEach(memberId => {
-      io.to(`user:${memberId}`).emit('member_left', {
-        conversationId: req.params.id,
-        userId: req.user._id
+      // Notify remaining members
+      conv.members.forEach(memberId => {
+        io.to(`user:${memberId}`).emit('member_left', {
+          conversationId: req.params.id,
+          userId: req.user._id
+        });
       });
-    });
+    } else {
+      // For direct conversations: Hide from user's view
+      if (!conv.hiddenFor.includes(req.user._id)) {
+        conv.hiddenFor.push(req.user._id);
+        await conv.save();
+      }
+    }
 
     res.json({ success: true });
   } catch (e) {
@@ -521,6 +548,57 @@ app.post('/api/conversations/:id/add-member', auth, async (req, res) => {
     });
 
     res.json({ success: true, conversation: populated });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Remove member from group (Admin only)
+app.post('/api/conversations/:id/remove-member', auth, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+
+    const conv = await Conversation.findById(req.params.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    if (conv.type !== 'group') {
+      return res.status(400).json({ error: 'Can only remove members from groups' });
+    }
+
+    // Check if requester is admin (first member)
+    if (String(conv.members[0]) !== String(req.user._id)) {
+      return res.status(403).json({ error: 'Only admin can remove members' });
+    }
+
+    // Check if user to remove is in the group
+    if (!conv.members.some(m => String(m) === String(userId))) {
+      return res.status(400).json({ error: 'User is not a member' });
+    }
+
+    // Cannot remove self (use leave instead)
+    if (String(userId) === String(req.user._id)) {
+      return res.status(400).json({ error: 'Cannot remove yourself, use leave group' });
+    }
+
+    // Remove user
+    conv.members = conv.members.filter(m => String(m) !== String(userId));
+    await conv.save();
+
+    // Notify all members (including the removed one)
+    io.to(`user:${userId}`).emit('member_removed', {
+      conversationId: req.params.id,
+      userId: userId
+    });
+
+    conv.members.forEach(memberId => {
+      io.to(`user:${memberId}`).emit('member_removed', {
+        conversationId: req.params.id,
+        userId: userId
+      });
+    });
+
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -620,7 +698,10 @@ io.on('connection', (socket) => {
     });
     await msg.save();
 
-    await Conversation.findByIdAndUpdate(conversationId, { lastMessageAt: new Date() });
+    await Conversation.findByIdAndUpdate(conversationId, {
+      lastMessageAt: new Date(),
+      hiddenFor: [] // Unhide for everyone
+    });
 
     const populated = await Message.findById(msg._id).populate('sender');
     const safe = toSafeMessage(populated);
@@ -808,3 +889,14 @@ const startServer = async () => {
 };
 
 startServer();
+
+// Periodic heartbeat to update lastSeenAt for connected users
+setInterval(() => {
+  if (!io) return;
+  io.sockets.sockets.forEach((socket) => {
+    if (socket.user) {
+      User.findByIdAndUpdate(socket.user._id, { lastSeenAt: new Date() })
+        .catch(e => console.error('Heartbeat update error:', e.message));
+    }
+  });
+}, 60 * 1000); // Every minute
