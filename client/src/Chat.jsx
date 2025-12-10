@@ -454,6 +454,7 @@ export default function Chat() {
   const [isCameraOn, setIsCameraOn] = useState(true)
   const [isScreenSharing, setIsScreenSharing] = useState(false)
   const [participantStates, setParticipantStates] = useState({})
+  const [enlargedImage, setEnlargedImage] = useState(null)
 
   const handleSaveEdit = async () => {
     if (!editingMessageId || !editingMessageContent.trim()) return
@@ -1980,7 +1981,6 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadSession, setUploadSession] = useState(null)
-  const [enlargedImage, setEnlargedImage] = useState(null)
   const listRef = useRef(null)
   const fileInputRef = useRef(null)
   const selectionHeaderRef = useRef(null)

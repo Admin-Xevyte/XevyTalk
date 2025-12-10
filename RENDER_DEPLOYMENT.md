@@ -18,8 +18,8 @@ Deploy **Server** and **Client** as separate services on Render:
 
 **Build Command:**
 ```bash
-cd server && npm install
-```
+
+```cd server && npm install
 
 **Start Command:**
 ```bash
