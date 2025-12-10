@@ -1092,7 +1092,7 @@ app.post('/api/conversations/:id/leave', auth, async (req, res) => {
   }
 });
 
-// Add member to group
+// Add member to group (allows adding anyone, even non-members)
 app.post('/api/conversations/:id/add-member', auth, async (req, res) => {
   try {
     const { userId } = req.body;
@@ -1111,23 +1111,29 @@ app.post('/api/conversations/:id/add-member', auth, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
-    // Check if user is already a member
-    if (conv.members.some(m => String(m) === String(userId))) {
-      return res.status(400).json({ error: 'User is already a member' });
+    // Check if user is already a member - if not, add them
+    if (!conv.members.some(m => String(m) === String(userId))) {
+      conv.members.push(userId);
+      await conv.save();
     }
-
-    // Add user to members
-    conv.members.push(userId);
-    await conv.save();
 
     // Notify all members including the new one
     const populated = await Conversation.findById(conv._id).populate('members');
+    
+    // Send notification to all members (including the newly added one)
     populated.members.forEach(memberId => {
       io.to(`user:${memberId._id}`).emit('member_added', {
         conversationId: req.params.id,
         userId,
         conversation: populated
       });
+    });
+    
+    // Special broadcast for call context - notify that user can join call
+    io.to(`user:${userId}`).emit('invited_to_call', {
+      conversationId: req.params.id,
+      invitedBy: req.user.username,
+      conversation: populated
     });
 
     res.json({ success: true, conversation: populated });
@@ -1389,6 +1395,11 @@ io.on('connection', (socket) => {
         kind: kind === 'video' ? 'video' : 'audio',
         from: { _id: String(user._id), username: user.username, avatar: user.avatar },
         isGroup: conv.type === 'group',
+        participants: conv.members.map(m => ({
+          _id: String(m._id),
+          username: m.username,
+          avatar: m.avatar
+        }))
       };
 
       // Caller joins call room
@@ -1412,6 +1423,9 @@ io.on('connection', (socket) => {
     try {
       if (!callId || !conversationId) return;
 
+      // Get conversation to send updated participants list
+      const conv = await Conversation.findById(conversationId).populate('members');
+
       // Join the shared call room
       socket.join(`call:${callId}`);
 
@@ -1431,13 +1445,25 @@ io.on('connection', (socket) => {
         callId,
         conversationId,
         userIds: otherUserIds,
+        participants: conv?.members.map(m => ({
+          _id: String(m._id),
+          username: m.username,
+          avatar: m.avatar
+        })) || []
       });
 
-      // Tell others that this user has joined the call
+      // Tell others that this user has joined the call with participant list
       socket.to(`call:${callId}`).emit('call_peer_accepted', {
         callId,
         conversationId,
         userId: String(user._id),
+        username: user.username,
+        avatar: user.avatar,
+        participants: conv?.members.map(m => ({
+          _id: String(m._id),
+          username: m.username,
+          avatar: m.avatar
+        })) || []
       });
     } catch (e) {
       console.error('call_accept error', e);
@@ -1449,16 +1475,28 @@ io.on('connection', (socket) => {
     io.to(`user:${toUserId}`).emit('call_signal', {
       callId,
       fromUserId: String(user._id),
+      fromUsername: user.username,
+      fromAvatar: user.avatar,
       data,
     });
   });
 
-  socket.on('call_end', ({ callId, conversationId }) => {
+  socket.on('call_end', async ({ callId, conversationId }) => {
     if (!callId || !conversationId) return;
+    
+    // Get conversation to send updated participants list
+    const conv = await Conversation.findById(conversationId).populate('members');
+    
     const payload = {
       callId,
       conversationId,
       fromUserId: String(user._id),
+      fromUsername: user.username,
+      participants: conv?.members.map(m => ({
+        _id: String(m._id),
+        username: m.username,
+        avatar: m.avatar
+      })) || []
     };
     // Notify everyone connected to this call and in the conversation room
     io.to(`call:${callId}`).emit('call_ended', payload);

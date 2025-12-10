@@ -420,10 +420,10 @@ function MembersPanel({ members, currentUser, conversation, token, apiBase }) {
             })
             const list = await r.json()
             const lower = search.toLowerCase()
+            // Show ALL matching users, regardless of membership
             const filtered = list
                 .filter(u =>
-                    !members.some(m => String(m._id) === String(u._id)) &&
-                    (u.username?.toLowerCase().includes(lower) || u.email?.toLowerCase().includes(lower))
+                    u.username?.toLowerCase().includes(lower) || u.email?.toLowerCase().includes(lower)
                 )
                 .slice(0, 5)
             setResults(filtered)

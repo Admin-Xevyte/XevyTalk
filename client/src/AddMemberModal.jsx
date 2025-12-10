@@ -21,8 +21,8 @@ export default function AddMemberModal({ conversationId, token, onClose, onSucce
             })
     }, [])
 
-    // Filter out users who are already members
-    const availableUsers = allUsers.filter(u => !existingMembers.some(m => String(m._id) === String(u._id)))
+    // Show all users (including those already in the group/conversation)
+    const availableUsers = allUsers
 
     const filteredUsers = searchQuery
         ? availableUsers.filter(u =>
