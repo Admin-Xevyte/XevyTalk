@@ -3,9 +3,10 @@ set -e
 
 echo "=== Building XevyTalk for Render ==="
 
-echo "Installing client dependencies..."
+echo "Installing client dependencies (including devDependencies for build)..."
 cd client
-npm install
+# Install all dependencies including devDependencies (needed for vite build)
+npm install --include=dev
 echo "Client dependencies installed ✓"
 
 echo "Building client..."
@@ -16,7 +17,7 @@ cd ..
 
 echo "Installing server dependencies..."
 cd server
-npm install
+npm install --production=false
 cd ..
 echo "Server dependencies installed ✓"
 

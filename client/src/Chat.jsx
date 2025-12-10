@@ -1700,6 +1700,7 @@ export default function Chat() {
                setSelectedMessages={setSelectedMessages}
                getDeletedIdsForConv={getDeletedIdsForConv}
                addDeletedForMe={addDeletedForMe}
+               setEnlargedImage={setEnlargedImage}
              />
         </div>
         <div className="w-72 flex-none border-l h-full hidden xl:block">
@@ -1719,6 +1720,30 @@ export default function Chat() {
         />
       )}
       {toast && <Toast notification={toast} onClose={() => setToast(null)} />}
+
+      {/* Image Lightbox Modal */}
+      {enlargedImage && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setEnlargedImage(null)}
+        >
+          <button
+            onClick={() => setEnlargedImage(null)}
+            className="absolute top-4 right-4 text-white hover:text-gray-300 text-2xl font-bold w-10 h-10 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70"
+          >
+            ✕
+          </button>
+          <img 
+            src={enlargedImage.url} 
+            alt={enlargedImage.name}
+            className="max-w-full max-h-[90vh] object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-sm bg-black/50 px-4 py-2 rounded">
+            {enlargedImage.name}
+          </div>
+        </div>
+      )}
 
       {/* Force Change Password Modal */}
       {user && user.mustChangePassword && (
@@ -1942,7 +1967,7 @@ function LeftPanel({ user, conversations, activeId, onPick, onNew }) {
   )
 }
 
-function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, refreshMessages, onStartCall, selectedMessages, setSelectedMessages, getDeletedIdsForConv, addDeletedForMe }) {
+function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, refreshMessages, onStartCall, selectedMessages, setSelectedMessages, getDeletedIdsForConv, addDeletedForMe, setEnlargedImage }) {
   const { activeId, messages, pushMessage, token, conversations, setConversations, setActiveId, setMessages, removeMessage } = useStore()
   const [text, setText] = useState('')
   const [editingMessageId, setEditingMessageId] = useState(null)
@@ -1955,6 +1980,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadSession, setUploadSession] = useState(null)
+  const [enlargedImage, setEnlargedImage] = useState(null)
   const listRef = useRef(null)
   const fileInputRef = useRef(null)
   const selectionHeaderRef = useRef(null)
@@ -2701,9 +2727,14 @@ function MessageBubble({ m, me, totalMembers, conv, onInfo, selected, onSelect, 
             {m.attachments.map((att, i) => (
               <div key={i}>
                 {att.type.startsWith('image/') ? (
-                  <img src={att.url} alt={att.name} className="max-w-full rounded-lg" />
+                  <img 
+                    src={att.url || att.fileURL} 
+                    alt={att.name} 
+                    className="max-w-full rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={() => setEnlargedImage({ url: att.url || att.fileURL, name: att.name })}
+                  />
                 ) : (
-                  <a href={att.url} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 p-2 rounded text-xs ${mine ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                  <a href={att.url || att.fileURL} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 p-2 rounded text-xs ${mine ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-700'}`}>
                     <span>📎</span>
                     <span>{att.name}</span>
                   </a>
