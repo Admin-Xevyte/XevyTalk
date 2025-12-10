@@ -2,7 +2,7 @@ services:
   - type: web
     name: xevytalk
     env: node
-    buildCommand: npm install --prefix client && npm install --prefix server && npm run build --prefix client
+    buildCommand: bash ./render-build.sh
     startCommand: node server/src/index.js
     envVars:
       - key: NODE_ENV
