@@ -71,11 +71,26 @@ export default function CallPage({
     currentUser,
     messages,
     onSendMessage,
-    participantStates = {}
+    participantStates = {},
+    token,
+    apiBase
 }) {
     const [duration, setDuration] = useState(0)
     const [showChat, setShowChat] = useState(false)
     const [showMembers, setShowMembers] = useState(false)
+    const [chatUnread, setChatUnread] = useState(0)
+    const prevMsgCountRef = useRef(messages?.length || 0)
+
+    useEffect(() => {
+        const currentCount = messages?.length || 0
+        const prev = prevMsgCountRef.current
+        if (!showChat && currentCount > prev) {
+            setChatUnread(c => c + (currentCount - prev))
+        }
+        prevMsgCountRef.current = currentCount
+    }, [messages?.length, showChat])
+
+    const clearChatUnread = () => setChatUnread(0)
 
     useEffect(() => {
         const start = Date.now()
@@ -126,7 +141,10 @@ export default function CallPage({
 
     const toggleChat = () => {
         setShowChat(!showChat)
-        if (!showChat) setShowMembers(false)
+        if (!showChat) {
+            setShowMembers(false)
+            clearChatUnread()
+        }
     }
 
     const toggleMembers = () => {
@@ -156,6 +174,7 @@ export default function CallPage({
                         label="Chat"
                         active={showChat}
                         onClick={toggleChat}
+                        badge={chatUnread > 0 ? chatUnread : null}
                     />
                     <TopBarButton
                         icon="people_outline"
@@ -306,7 +325,13 @@ export default function CallPage({
                                 />
                             )}
                             {showMembers && (
-                                <MembersPanel members={members} currentUser={currentUser} />
+                                <MembersPanel
+                                    members={members}
+                                    currentUser={currentUser}
+                                    conversation={conversation}
+                                    token={token}
+                                    apiBase={apiBase}
+                                />
                             )}
                         </div>
                     </div>
@@ -316,7 +341,7 @@ export default function CallPage({
     )
 }
 
-function TopBarButton({ icon, label, active = true, onClick, danger = false }) {
+function TopBarButton({ icon, label, active = true, onClick, danger = false, badge = null }) {
     return (
         <button
             onClick={onClick}
@@ -328,6 +353,11 @@ function TopBarButton({ icon, label, active = true, onClick, danger = false }) {
         >
             <span className={`material-icons text-xl mb-0.5 ${danger ? 'text-red-400' : ''}`}>{icon}</span>
             <span className="text-[10px] font-medium opacity-80">{label}</span>
+            {badge ? (
+                <span className="mt-1 text-[10px] font-bold text-white bg-red-500 rounded-full px-2 py-0.5">
+                    {badge > 9 ? '9+' : badge}
+                </span>
+            ) : null}
         </button>
     )
 }
@@ -373,14 +403,67 @@ function ChatPanel({ messages, onSend, currentUser, members }) {
     )
 }
 
-function MembersPanel({ members, currentUser }) {
+function MembersPanel({ members, currentUser, conversation, token, apiBase }) {
+    const [search, setSearch] = useState('')
+    const [results, setResults] = useState([])
+    const [loading, setLoading] = useState(false)
+    const [info, setInfo] = useState(null)
+
+    const isGroup = conversation?.type === 'group'
+
+    const searchUsers = async () => {
+        if (!search.trim()) { setResults([]); return }
+        setLoading(true)
+        try {
+            const r = await fetch(`${apiBase}/api/users`, {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+            const list = await r.json()
+            const lower = search.toLowerCase()
+            const filtered = list
+                .filter(u =>
+                    !members.some(m => String(m._id) === String(u._id)) &&
+                    (u.username?.toLowerCase().includes(lower) || u.email?.toLowerCase().includes(lower))
+                )
+                .slice(0, 5)
+            setResults(filtered)
+        } catch (e) {
+            console.error(e)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const addMember = async (userId) => {
+        if (!conversation?._id) return
+        try {
+            setLoading(true)
+            const r = await fetch(`${apiBase}/api/conversations/${conversation._id}/add-member`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ userId })
+            })
+            const data = await r.json()
+            if (!r.ok) {
+                setInfo(data.error || 'Failed to add member')
+            } else {
+                setInfo('Participant added. They can join the call now.')
+            }
+        } catch (e) {
+            console.error(e)
+            setInfo('Failed to add member')
+        } finally {
+            setLoading(false)
+        }
+    }
+
     return (
-        <div className="flex-1 overflow-y-auto p-2">
-            <div className="px-2 py-1 text-xs text-gray-500 font-medium mb-2">
+        <div className="flex-1 overflow-y-auto p-2 space-y-3">
+            <div className="px-2 py-1 text-xs text-gray-500 font-medium">
                 {members.length} {members.length === 1 ? 'Participant' : 'Participants'}
             </div>
             {members.map(m => {
-                const isCurrentUser = m._id === currentUser._id
+                const isCurrentUser = String(m._id) === String(currentUser._id)
                 return (
                     <div key={m._id} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg">
                         <div className="relative">
@@ -399,6 +482,45 @@ function MembersPanel({ members, currentUser }) {
                     </div>
                 )
             })}
+
+            {isGroup && (
+                <div className="p-2 rounded-lg border bg-white space-y-2">
+                    <div className="text-xs font-semibold text-gray-600">Add participants</div>
+                    <div className="flex gap-2">
+                        <input
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && searchUsers()}
+                            placeholder="Search by name or email"
+                            className="flex-1 rounded-md border px-2 py-1 text-sm"
+                        />
+                        <button
+                            onClick={searchUsers}
+                            disabled={loading}
+                            className="px-3 py-1 rounded-md bg-indigo-600 text-white text-sm disabled:opacity-50"
+                        >
+                            {loading ? '...' : 'Search'}
+                        </button>
+                    </div>
+                    {info && <div className="text-xs text-green-600">{info}</div>}
+                    {results.length > 0 && (
+                        <div className="space-y-1">
+                            {results.map(u => (
+                                <div key={u._id} className="flex items-center justify-between px-2 py-1 rounded hover:bg-gray-50">
+                                    <div className="text-sm truncate">{u.username || u.email}</div>
+                                    <button
+                                        onClick={() => addMember(u._id)}
+                                        disabled={loading}
+                                        className="text-xs text-indigo-600 hover:text-indigo-800"
+                                    >
+                                        Add
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     )
 }

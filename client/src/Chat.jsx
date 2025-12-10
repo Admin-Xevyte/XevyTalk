@@ -1612,6 +1612,8 @@ export default function Chat() {
         messages={messages[currentCall.conversationId] || []}
         onSendMessage={(text) => handleSendMessage(text, currentCall.conversationId)}
         participantStates={participantStates}
+        token={token}
+        apiBase={API}
       />
     )
   }
@@ -2337,6 +2339,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                     )}
                     <button
                       onClick={async () => {
+                        if (selectedMessages.size === 0) return
                         if (!confirm(`Delete ${selectedMessages.size} message(s) for yourself?`)) return
                         try {
                           // Optimistic update
@@ -2354,6 +2357,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                         }
                       }}
                       className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                      disabled={selectedMessages.size === 0}
                     >
                       <span className="material-icons">delete</span>
                       <span>Delete for Me</span>
@@ -2362,6 +2366,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                     {allMine && allUnseenByOthers && (
                       <button
                         onClick={async () => {
+                          if (selectedMessages.size === 0) return
                           if (!confirm(`Delete ${selectedMessages.size} message(s) for everyone?`)) return
                           try {
                             const promises = [...selectedMessages].map(msgId =>

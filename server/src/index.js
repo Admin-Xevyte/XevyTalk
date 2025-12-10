@@ -149,6 +149,12 @@ const decryptText = (packed = '') => {
 // Email configuration
 const emailTransporter = nodemailer.createTransport({
   service: 'gmail',
+  pool: true,
+  maxConnections: 3,
+  maxMessages: 10,
+  connectionTimeout: 5000, // 5s
+  greetingTimeout: 5000,
+  socketTimeout: 7000,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
@@ -232,12 +238,17 @@ const sendWelcomeEmail = async (email, username, password) => {
     `
   };
 
+  const sendWithTimeout = (opts, ms = 7000) => Promise.race([
+    emailTransporter.sendMail(opts),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Email send timeout')), ms))
+  ]);
+
   try {
-    await emailTransporter.sendMail(mailOptions);
+    await sendWithTimeout(mailOptions);
     console.log(`✓ Welcome email sent to ${email}`);
     return true;
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('Error sending email (continuing without blocking user creation):', error?.message || error);
     return false;
   }
 };
@@ -530,9 +541,9 @@ app.post('/api/media/upload/:sessionId', auth, upload.single('file'), async (req
   try {
     const { sessionId } = req.params;
 
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
 
     if (!gridFSBucket) {
       return res.status(500).json({ error: 'File storage not initialized' });
@@ -584,7 +595,7 @@ app.post('/api/media/upload/:sessionId', auth, upload.single('file'), async (req
           session.fileURL = fileURL;
           await session.save();
 
-          res.json({
+  res.json({
             success: true,
             fileId,
             fileURL,
@@ -983,15 +994,15 @@ app.post('/api/conversations/group', auth, async (req, res) => {
 
 app.get('/api/messages/:conversationId', auth, async (req, res) => {
   try {
-    const { conversationId } = req.params;
+  const { conversationId } = req.params;
     const messages = await Message.find({ conversation: conversationId })
-      .sort({ createdAt: 1 })
-      .populate('sender');
+    .sort({ createdAt: 1 })
+    .populate('sender');
     // Decrypt content and add attachment URLs
     const safeMessages = messages.map(m => toSafeMessage(m, req));
-    // Filter out messages with no content and no attachments
+  // Filter out messages with no content and no attachments
     const filtered = safeMessages.filter(msg => msg.content || (msg.attachments && msg.attachments.length > 0));
-    res.json(filtered);
+  res.json(filtered);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
