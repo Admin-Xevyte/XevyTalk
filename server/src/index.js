@@ -708,7 +708,6 @@ app.post('/api/messages/send', auth, async (req, res) => {
       conversation: conversationId,
       sender: req.user._id,
       contentEnc: encContent,
-      content: content,
       tempId,
       attachments: cleanAttachments
     });
@@ -1206,7 +1205,6 @@ app.put('/api/messages/:id', auth, async (req, res) => {
 
     const encContent = encryptText(content);
     msg.contentEnc = encContent;
-    msg.content = content;
     msg.editedAt = new Date();
     await msg.save();
 
@@ -1330,7 +1328,6 @@ io.on('connection', (socket) => {
       conversation: conversationId,
       sender: user._id,
       contentEnc: encContent,
-      content: content || '',
       tempId,
       attachments: parsedAttachments
     });
