@@ -24,13 +24,14 @@ const app = express();
 
 // Enhanced CORS configuration for production
 const allowedOrigins = [
+  process.env.FRONTEND_URL,
   'https://xevytalk-client.onrender.com',
   'http://localhost:5173',
   'http://localhost:5174',
   'http://localhost:3000',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174'
-];
+].filter(Boolean); // Remove undefined values
 
 app.use(cors({
   origin: (origin, callback) => {
