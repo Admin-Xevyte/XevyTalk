@@ -409,7 +409,8 @@ function MembersPanel({ members, currentUser, conversation, token, apiBase }) {
     const [loading, setLoading] = useState(false)
     const [info, setInfo] = useState(null)
 
-    const isGroup = conversation?.type === 'group'
+    // Allow adding participants to both group AND direct calls
+    const canAddParticipants = conversation && (conversation.type === 'group' || conversation.type === 'direct')
 
     const searchUsers = async () => {
         if (!search.trim()) { setResults([]); return }
@@ -445,13 +446,15 @@ function MembersPanel({ members, currentUser, conversation, token, apiBase }) {
             })
             const data = await r.json()
             if (!r.ok) {
-                setInfo(data.error || 'Failed to add member')
+                setInfo(data.error || 'Failed to add participant')
             } else {
-                setInfo('Participant added. They can join the call now.')
+                setInfo('Participant added! They\'ll be notified to join the call.')
+                setSearch('')
+                setResults([])
             }
         } catch (e) {
             console.error(e)
-            setInfo('Failed to add member')
+            setInfo('Failed to add participant')
         } finally {
             setLoading(false)
         }
@@ -483,7 +486,7 @@ function MembersPanel({ members, currentUser, conversation, token, apiBase }) {
                 )
             })}
 
-            {isGroup && (
+            {canAddParticipants && (
                 <div className="p-2 rounded-lg border bg-white space-y-2">
                     <div className="text-xs font-semibold text-gray-600">Add participants</div>
                     <div className="flex gap-2">

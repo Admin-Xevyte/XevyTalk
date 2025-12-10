@@ -1386,7 +1386,10 @@ io.on('connection', (socket) => {
       if (!conv) return;
 
       const isMember = conv.members.some(m => String(m._id) === String(user._id));
-      if (!isMember) return;
+      if (!isMember) {
+        socket.emit('call_error', { error: 'Not a member of this conversation' });
+        return;
+      }
 
       const callId = uuidv4();
       const payload = {
@@ -1405,17 +1408,24 @@ io.on('connection', (socket) => {
       // Caller joins call room
       socket.join(`call:${callId}`);
 
+      // Also join conversation room for notifications
+      socket.join(`conv:${conversationId}`);
+
       // Notify caller that call is created
       socket.emit('call_started', payload);
 
       // Notify all other members (direct: only the other user, group: everyone else)
-      conv.members
-        .filter(m => String(m._id) !== String(user._id))
-        .forEach(m => {
-          io.to(`user:${m._id}`).emit('call_incoming', payload);
-        });
+      const notifiedMembers = conv.members
+        .filter(m => String(m._id) !== String(user._id));
+      
+      notifiedMembers.forEach(m => {
+        io.to(`user:${m._id}`).emit('call_incoming', payload);
+      });
+      
+      console.log(`Call started: ${callId} in ${conv.type} conversation with ${notifiedMembers.length} participants to notify`);
     } catch (e) {
       console.error('call_start error', e);
+      socket.emit('call_error', { error: e.message });
     }
   });
 
@@ -1425,9 +1435,23 @@ io.on('connection', (socket) => {
 
       // Get conversation to send updated participants list
       const conv = await Conversation.findById(conversationId).populate('members');
+      if (!conv) {
+        socket.emit('call_error', { error: 'Conversation not found' });
+        return;
+      }
+
+      // Check if user is member
+      const isMember = conv.members.some(m => String(m._id) === String(user._id));
+      if (!isMember) {
+        socket.emit('call_error', { error: 'Not a member of this conversation' });
+        return;
+      }
 
       // Join the shared call room
       socket.join(`call:${callId}`);
+      
+      // Also join conversation room
+      socket.join(`conv:${conversationId}`);
 
       // Find other sockets already in this call room to build the peer list
       const room = io.sockets.adapter.rooms.get(`call:${callId}`);
@@ -1445,7 +1469,7 @@ io.on('connection', (socket) => {
         callId,
         conversationId,
         userIds: otherUserIds,
-        participants: conv?.members.map(m => ({
+        participants: conv.members.map(m => ({
           _id: String(m._id),
           username: m.username,
           avatar: m.avatar
@@ -1459,48 +1483,64 @@ io.on('connection', (socket) => {
         userId: String(user._id),
         username: user.username,
         avatar: user.avatar,
-        participants: conv?.members.map(m => ({
+        participants: conv.members.map(m => ({
           _id: String(m._id),
           username: m.username,
           avatar: m.avatar
         })) || []
       });
+      
+      console.log(`User ${user.username} accepted call ${callId}, existing participants: ${otherUserIds.length}`);
     } catch (e) {
       console.error('call_accept error', e);
+      socket.emit('call_error', { error: e.message });
     }
   });
 
   socket.on('call_signal', ({ callId, toUserId, data }) => {
-    if (!callId || !toUserId || !data) return;
-    io.to(`user:${toUserId}`).emit('call_signal', {
-      callId,
-      fromUserId: String(user._id),
-      fromUsername: user.username,
-      fromAvatar: user.avatar,
-      data,
-    });
+    try {
+      if (!callId || !toUserId || !data) {
+        console.warn('call_signal missing required fields');
+        return;
+      }
+      io.to(`user:${toUserId}`).emit('call_signal', {
+        callId,
+        fromUserId: String(user._id),
+        fromUsername: user.username,
+        fromAvatar: user.avatar,
+        data,
+      });
+    } catch (e) {
+      console.error('call_signal error', e);
+    }
   });
 
   socket.on('call_end', async ({ callId, conversationId }) => {
-    if (!callId || !conversationId) return;
-    
-    // Get conversation to send updated participants list
-    const conv = await Conversation.findById(conversationId).populate('members');
-    
-    const payload = {
-      callId,
-      conversationId,
-      fromUserId: String(user._id),
-      fromUsername: user.username,
-      participants: conv?.members.map(m => ({
-        _id: String(m._id),
-        username: m.username,
-        avatar: m.avatar
-      })) || []
-    };
-    // Notify everyone connected to this call and in the conversation room
-    io.to(`call:${callId}`).emit('call_ended', payload);
-    io.to(`conv:${conversationId}`).emit('call_ended', payload);
+    try {
+      if (!callId || !conversationId) return;
+      
+      // Get conversation to send updated participants list
+      const conv = await Conversation.findById(conversationId).populate('members');
+      
+      const payload = {
+        callId,
+        conversationId,
+        fromUserId: String(user._id),
+        fromUsername: user.username,
+        participants: conv?.members.map(m => ({
+          _id: String(m._id),
+          username: m.username,
+          avatar: m.avatar
+        })) || []
+      };
+      // Notify everyone connected to this call and in the conversation room
+      io.to(`call:${callId}`).emit('call_ended', payload);
+      io.to(`conv:${conversationId}`).emit('call_ended', payload);
+      
+      console.log(`Call ${callId} ended by ${user.username}`);
+    } catch (e) {
+      console.error('call_end error', e);
+    }
   });
 
   socket.on('call_leave', ({ callId }) => {

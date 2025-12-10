@@ -947,6 +947,25 @@ export default function Chat() {
         }))
       })
 
+      s.on('call_error', ({ error }) => {
+        console.error('Call error:', error)
+        setInfoMsg({ type: 'error', msg: `Call error: ${error}` })
+        cleanupCall()
+      })
+
+      s.on('invited_to_call', ({ conversationId, invitedBy, conversation }) => {
+        console.log(`Invited to call by ${invitedBy}`)
+        const conv = { _id: conversationId, ...conversation }
+        setConversations(prev => {
+          const existing = prev.find(c => String(c._id) === String(conversationId))
+          if (existing) {
+            return prev.map(c => String(c._id) === String(conversationId) ? conv : c)
+          }
+          return [...prev, conv]
+        })
+        setInfoMsg({ type: 'info', msg: `${invitedBy} added you to a call` })
+      })
+
       try {
         const res = await fetch(`${API}/api/conversations`, {
           method: 'GET',
@@ -1338,36 +1357,57 @@ export default function Chat() {
   }
 
   function startCall(kind) {
-    if (!socketRef.current || !activeId || !user) return
-    const conv = conversations.find(c => c._id === activeId)
-    if (!conv) return
-    socketRef.current.emit('call_start', { conversationId: activeId, kind })
+    if (!socketRef.current || !activeId || !user) {
+      console.error('Cannot start call: socket, activeId, or user missing');
+      return;
+    }
+    const conv = conversations.find(c => c._id === activeId);
+    if (!conv) {
+      console.error('Conversation not found');
+      return;
+    }
+    console.log(`Starting ${kind} call in ${conv.type} conversation`);
+    socketRef.current.emit('call_start', { conversationId: activeId, kind });
   }
 
   async function acceptIncomingCall() {
-    if (!incomingCall || !socketRef.current) return
-    const call = incomingCall
-    setIncomingCall(null)
-    currentCallRef.current = call
-    setCurrentCall(call)
-    await ensureLocalStream(call.kind)
-    socketRef.current.emit('call_accept', { callId: call.callId, conversationId: call.conversationId })
+    if (!incomingCall || !socketRef.current) {
+      console.error('Cannot accept call: no incoming call or socket');
+      return;
+    }
+    try {
+      const call = incomingCall;
+      setIncomingCall(null);
+      currentCallRef.current = call;
+      setCurrentCall(call);
+      await ensureLocalStream(call.kind);
+      socketRef.current.emit('call_accept', { callId: call.callId, conversationId: call.conversationId });
+    } catch (e) {
+      console.error('Error accepting call:', e);
+      setIncomingCall(null);
+    }
   }
 
   function rejectIncomingCall() {
     if (!incomingCall || !socketRef.current) {
-      setIncomingCall(null)
-      return
+      setIncomingCall(null);
+      return;
     }
-    const call = incomingCall
-    socketRef.current.emit('call_end', { callId: call.callId, conversationId: call.conversationId })
-    setIncomingCall(null)
-    cleanupCall()
+    try {
+      const call = incomingCall;
+      socketRef.current.emit('call_end', { callId: call.callId, conversationId: call.conversationId });
+      setIncomingCall(null);
+      cleanupCall();
+    } catch (e) {
+      console.error('Error rejecting call:', e);
+      setIncomingCall(null);
+    }
   }
 
   function endCall() {
     if (currentCall && socketRef.current) {
-      const conv = conversations.find(c => c._id === currentCall.conversationId)
+      try {
+        const conv = conversations.find(c => c._id === currentCall.conversationId);
       if (conv && conv.type === 'group') {
         socketRef.current.emit('call_leave', { callId: currentCall.callId, conversationId: currentCall.conversationId })
       } else {
