@@ -71,8 +71,8 @@ const ALLOWED_FILE_TYPES = [
 ];
 
 // Configure Multer to use memory storage (files will be stored in MongoDB GridFS)
-const upload = multer({ 
-  storage: multer.memoryStorage(), 
+const upload = multer({
+  storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (req, file, cb) => {
     if (ALLOWED_FILE_TYPES.includes(file.mimetype)) {
@@ -250,10 +250,10 @@ const sendWelcomeEmail = async (email, username, password) => {
               </div>
 
               <div class="button-container">
-                <a href="http://localhost:5173/login" class="button">Login to Account</a>
+                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login" class="button">Login to Account</a>
               </div>
               
-              <p class="text" style="font-size: 14px; color: #71717a; text-align: center;">If the button doesn't work, copy this link:<br><a href="http://localhost:5173/login" style="color: #0891b2;">http://localhost:5173/login</a></p>
+              <p class="text" style="font-size: 14px; color: #71717a; text-align: center;">If the button doesn't work, copy this link:<br><a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login" style="color: #0891b2;">${process.env.FRONTEND_URL || 'http://localhost:5173'}/login</a></p>
             </div>
             <div class="footer">
               <p class="footer-text">&copy; ${new Date().getFullYear()} XevyTalk. All rights reserved.</p>
@@ -574,9 +574,9 @@ app.post('/api/media/upload/:sessionId', auth, upload.single('file'), async (req
   try {
     const { sessionId } = req.params;
 
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
 
     if (!gridFSBucket) {
       return res.status(500).json({ error: 'File storage not initialized' });
@@ -603,10 +603,10 @@ app.post('/api/media/upload/:sessionId', auth, upload.single('file'), async (req
 
     // Upload to GridFS with encryption
     const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}-${session.fileName}`;
-    
+
     // Encrypt file buffer before uploading
     const { iv, tag, encrypted } = encryptFileBuffer(req.file.buffer);
-    
+
     const uploadStream = gridFSBucket.openUploadStream(filename, {
       contentType: session.fileType,
       metadata: {
@@ -635,7 +635,7 @@ app.post('/api/media/upload/:sessionId', auth, upload.single('file'), async (req
           session.fileURL = fileURL;
           await session.save();
 
-  res.json({
+          res.json({
             success: true,
             fileId,
             fileURL,
@@ -693,10 +693,10 @@ app.post('/api/messages/send', auth, async (req, res) => {
     // If file is included, verify it was uploaded via session
     let attachments = [];
     if (fileId && fileURL) {
-      const session = await UploadSession.findOne({ 
-        fileId, 
-        userId: req.user._id, 
-        uploaded: true 
+      const session = await UploadSession.findOne({
+        fileId,
+        userId: req.user._id,
+        uploaded: true
       });
 
       if (!session) {
@@ -721,7 +721,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
 
     // Ensure attachments is properly formatted
     const attachmentsArray = attachments && attachments.length > 0 ? attachments : [];
-    
+
     // Validate and clean attachments
     const cleanAttachments = attachmentsArray.map(att => {
       // Handle if attachment is stringified
@@ -733,7 +733,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
           return null;
         }
       }
-      
+
       return {
         fileId: String(att.fileId || ''),
         fileURL: String(att.fileURL || att.url || ''),
@@ -743,7 +743,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
         thumbnailURL: att.thumbnailURL ? String(att.thumbnailURL) : null
       };
     }).filter(att => att && att.fileId); // Remove invalid attachments
-    
+
     const msg = new Message({
       conversation: conversationId,
       sender: req.user._id,
@@ -790,14 +790,14 @@ app.get('/api/files/:fileId', async (req, res) => {
   try {
     const fileId = req.params.fileId;
     let objectId;
-    
+
     // Convert string ID to ObjectId
     try {
       objectId = new mongoose.Types.ObjectId(fileId);
     } catch (error) {
       return res.status(400).json({ error: 'Invalid file ID' });
     }
-    
+
     // Check if file exists
     const files = await gridFSBucket.find({ _id: objectId }).toArray();
     if (files.length === 0) {
@@ -806,23 +806,23 @@ app.get('/api/files/:fileId', async (req, res) => {
 
     const file = files[0];
     const downloadStream = gridFSBucket.openDownloadStream(objectId);
-    
+
     // Handle encrypted files
     if (file.metadata?.encrypted) {
       try {
         // Collect encrypted data from stream
         const chunks = [];
         downloadStream.on('data', chunk => chunks.push(chunk));
-        
+
         downloadStream.on('end', () => {
           try {
             const encryptedBuffer = Buffer.concat(chunks);
             const iv = Buffer.from(file.metadata.encryptionIV, 'base64');
             const tag = Buffer.from(file.metadata.encryptionTag, 'base64');
-            
+
             // Decrypt file
             const decryptedBuffer = decryptFileBuffer(iv, tag, encryptedBuffer);
-            
+
             // Send decrypted file
             res.set('Content-Type', file.metadata?.mimeType || 'application/octet-stream');
             res.set('Content-Disposition', `attachment; filename="${encodeURIComponent(file.metadata?.originalName || file.filename)}"`);
@@ -833,7 +833,7 @@ app.get('/api/files/:fileId', async (req, res) => {
             res.status(500).json({ error: 'Failed to decrypt file' });
           }
         });
-        
+
         downloadStream.on('error', (error) => {
           console.error('Stream error during decryption:', error);
           if (!res.headersSent) {
@@ -1073,16 +1073,16 @@ app.post('/api/conversations/group', auth, async (req, res) => {
 
 app.get('/api/messages/:conversationId', auth, async (req, res) => {
   try {
-  const { conversationId } = req.params;
+    const { conversationId } = req.params;
     const messages = await Message.find({ conversation: conversationId })
-    .sort({ createdAt: 1 })
-    .populate('sender')
-    .populate('replyTo');
+      .sort({ createdAt: 1 })
+      .populate('sender')
+      .populate('replyTo');
     // Decrypt content and add attachment URLs
     const safeMessages = messages.map(m => toSafeMessage(m, req));
-  // Filter out messages with no content and no attachments
+    // Filter out messages with no content and no attachments
     const filtered = safeMessages.filter(msg => msg.content || (msg.attachments && msg.attachments.length > 0));
-  res.json(filtered);
+    res.json(filtered);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1200,7 +1200,7 @@ app.post('/api/conversations/:id/add-member', auth, async (req, res) => {
 
     // Notify all members including the new one
     const populated = await Conversation.findById(conv._id).populate('members');
-    
+
     // Send notification to all members (including the newly added one)
     populated.members.forEach(memberId => {
       io.to(`user:${memberId._id}`).emit('member_added', {
@@ -1209,7 +1209,7 @@ app.post('/api/conversations/:id/add-member', auth, async (req, res) => {
         conversation: populated
       });
     });
-    
+
     // Special broadcast for call context - notify that user can join call
     io.to(`user:${userId}`).emit('invited_to_call', {
       conversationId: req.params.id,
@@ -1393,7 +1393,7 @@ io.on('connection', (socket) => {
     if (attachments) {
       try {
         parsedAttachments = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
-        
+
         // Validate that attachments only contain metadata, not file content
         parsedAttachments = parsedAttachments
           .filter(att => att.fileId && att.fileURL) // Must have fileId and fileURL (already uploaded)
@@ -1427,7 +1427,7 @@ io.on('connection', (socket) => {
     });
 
     const populated = await Message.findById(msg._id).populate('sender').populate('replyTo');
-    
+
     // Generate URLs for attachments (metadata only)
     const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
     const safe = toSafeMessage(populated);
@@ -1437,7 +1437,7 @@ io.on('connection', (socket) => {
         url: att.fileURL || att.url || `${protocol}://localhost:${PORT}/api/files/${att.fileId}`
       }));
     }
-    
+
     io.to(`conv:${conversationId}`).emit('message_new', safe);
   });
 
@@ -1499,11 +1499,11 @@ io.on('connection', (socket) => {
       // Notify all other members (direct: only the other user, group: everyone else)
       const notifiedMembers = conv.members
         .filter(m => String(m._id) !== String(user._id));
-      
+
       notifiedMembers.forEach(m => {
         io.to(`user:${m._id}`).emit('call_incoming', payload);
       });
-      
+
       console.log(`Call started: ${callId} in ${conv.type} conversation with ${notifiedMembers.length} participants to notify`);
     } catch (e) {
       console.error('call_start error', e);
@@ -1531,7 +1531,7 @@ io.on('connection', (socket) => {
 
       // Join the shared call room
       socket.join(`call:${callId}`);
-      
+
       // Also join conversation room
       socket.join(`conv:${conversationId}`);
 
@@ -1571,7 +1571,7 @@ io.on('connection', (socket) => {
           avatar: m.avatar
         })) || []
       });
-      
+
       console.log(`User ${user.username} accepted call ${callId}, existing participants: ${otherUserIds.length}`);
     } catch (e) {
       console.error('call_accept error', e);
@@ -1600,10 +1600,10 @@ io.on('connection', (socket) => {
   socket.on('call_end', async ({ callId, conversationId }) => {
     try {
       if (!callId || !conversationId) return;
-      
+
       // Get conversation to send updated participants list
       const conv = await Conversation.findById(conversationId).populate('members');
-      
+
       const payload = {
         callId,
         conversationId,
@@ -1618,7 +1618,7 @@ io.on('connection', (socket) => {
       // Notify everyone connected to this call and in the conversation room
       io.to(`call:${callId}`).emit('call_ended', payload);
       io.to(`conv:${conversationId}`).emit('call_ended', payload);
-      
+
       console.log(`Call ${callId} ended by ${user.username}`);
     } catch (e) {
       console.error('call_end error', e);
@@ -1683,7 +1683,7 @@ const startServer = async () => {
     console.log('Connecting to MongoDB...');
     await mongoose.connect(MONGO_URI, connectionOptions);
     console.log('Connected to MongoDB successfully');
-    
+
     // Initialize GridFS bucket for file storage
     const db = mongoose.connection.db;
     gridFSBucket = new GridFSBucket(db, { bucketName: 'files' });
@@ -1691,7 +1691,7 @@ const startServer = async () => {
   } catch (err) {
     console.error('Failed to connect to MongoDB:', err.message);
     console.error('Error details:', err);
-    
+
     // Check if it's a DNS/network error
     if (err.message.includes('ESERVFAIL') || err.message.includes('queryTxt') || err.message.includes('ENOTFOUND')) {
       console.error('\n⚠️  DNS Resolution Error - Cannot find MongoDB Atlas cluster:');
@@ -1706,14 +1706,14 @@ const startServer = async () => {
       console.error('   → Copy the correct connection string from Atlas');
       console.error('   → Verify Network Access allows your IP address');
       console.error('\n   Trying fallback to local MongoDB...');
-      
+
       // Try local MongoDB as fallback
       try {
         const localURI = 'mongodb://127.0.0.1:27017/chatbot';
         console.log('Connecting to local MongoDB:', localURI);
         await mongoose.connect(localURI, { serverSelectionTimeoutMS: 5000 });
         console.log('✓ Connected to local MongoDB (fallback)');
-        
+
         const db = mongoose.connection.db;
         gridFSBucket = new GridFSBucket(db, { bucketName: 'files' });
         console.log('GridFS bucket initialized for file storage');
@@ -1727,7 +1727,7 @@ const startServer = async () => {
       console.error('   - Check MongoDB username and password in .env file');
       console.error('   - Verify database user has correct permissions in Atlas');
     }
-    
+
     process.exit(1);
   }
 
@@ -1735,7 +1735,7 @@ const startServer = async () => {
     console.log(`API http://localhost:${PORT}`);
     console.log(`Server listening on all interfaces (0.0.0.0:${PORT})`);
   });
-  
+
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`Port ${PORT} is already in use. Please stop the other process or use a different port.`);

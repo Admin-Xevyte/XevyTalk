@@ -9,6 +9,7 @@ import CallPage from './CallPage'
 import AddMemberModal from './AddMemberModal'
 import { useNavigate } from 'react-router-dom'
 import { generateKey, exportKey, importKey, encryptMessage, decryptMessage, isEncrypted } from './crypto'
+import rtcConfig from './iceConfig'
 
 dayjs.extend(relativeTime)
 
@@ -1032,7 +1033,7 @@ export default function Chat() {
     try { return JSON.parse(localStorage.getItem('deletedForMe') || '{}') } catch { return {} }
   }
   const setDeletedForMeMap = (map) => {
-    try { localStorage.setItem('deletedForMe', JSON.stringify(map)) } catch {}
+    try { localStorage.setItem('deletedForMe', JSON.stringify(map)) } catch { }
   }
   const addDeletedForMe = (convId, ids) => {
     const map = getDeletedForMeMap()
@@ -1122,17 +1123,7 @@ export default function Chat() {
     let pc = peerConnectionsRef.current.get(key)
     if (pc) return pc
 
-    pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
-      ],
-      iceCandidatePoolSize: 10
-    })
+    pc = new RTCPeerConnection(rtcConfig)
     peerConnectionsRef.current.set(key, pc)
 
     // Queue for ICE candidates that arrive before remote description
@@ -1183,14 +1174,24 @@ export default function Chat() {
 
     pc.onicecandidate = (event) => {
       if (event.candidate && socketRef.current) {
-        console.log(`ICE candidate for ${key}:`, event.candidate.candidate.substring(0, 50))
+        const candidateStr = event.candidate.candidate
+        const candidateType = event.candidate.type || 'unknown'
+        // Extract candidate type from the candidate string for better logging
+        let typeLabel = 'unknown'
+        if (candidateStr.includes('typ host')) typeLabel = 'host (local)'
+        else if (candidateStr.includes('typ srflx')) typeLabel = 'srflx (STUN)'
+        else if (candidateStr.includes('typ relay')) typeLabel = 'relay (TURN)'
+        else if (candidateStr.includes('typ prflx')) typeLabel = 'prflx (peer reflexive)'
+
+        console.log(`🔌 ICE candidate for ${key} [${typeLabel}]:`, candidateStr.substring(0, 60) + '...')
+
         socketRef.current.emit('call_signal', {
           callId,
           toUserId: key,
           data: { candidate: event.candidate }
         })
       } else if (!event.candidate) {
-        console.log(`ICE gathering complete for ${key}`)
+        console.log(`✅ ICE gathering complete for ${key}`)
       }
     }
 
@@ -1213,11 +1214,21 @@ export default function Chat() {
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
-      console.log(`ICE connection state for ${key}:`, state)
+      const stateEmoji = {
+        'new': '🆕',
+        'checking': '🔍',
+        'connected': '✅',
+        'completed': '✅',
+        'failed': '❌',
+        'disconnected': '⚠️',
+        'closed': '🔒'
+      }
+      console.log(`${stateEmoji[state] || '📡'} ICE connection state for ${key}:`, state)
+
       if (state === 'failed') {
         if (iceRestartAttempts < MAX_ICE_RESTARTS) {
           iceRestartAttempts++
-          console.log(`ICE connection failed, attempting restart (${iceRestartAttempts}/${MAX_ICE_RESTARTS})`)
+          console.log(`🔄 ICE connection failed, attempting restart (${iceRestartAttempts}/${MAX_ICE_RESTARTS})`)
           try {
             pc.restartIce()
             // Give it more time after restart
@@ -1230,14 +1241,14 @@ export default function Chat() {
             schedulePeerRemoval(4000)
           }
         } else {
-          console.error(`ICE connection failed after ${MAX_ICE_RESTARTS} restart attempts for ${key}`)
+          console.error(`❌ ICE connection failed after ${MAX_ICE_RESTARTS} restart attempts for ${key}`)
           schedulePeerRemoval(2000)
         }
       } else if (state === 'disconnected') {
-        console.log(`ICE disconnected for ${key}, waiting for reconnection...`)
+        console.log(`⚠️ ICE disconnected for ${key}, waiting for reconnection...`)
         schedulePeerRemoval(8000) // Give more time for reconnection
       } else if (state === 'checking') {
-        console.log(`ICE checking for ${key}`)
+        console.log(`🔍 ICE checking for ${key}`)
         // Cancel any pending removal when we start checking again
         if (iceDisconnectTimeout) {
           clearTimeout(iceDisconnectTimeout)
@@ -1245,7 +1256,7 @@ export default function Chat() {
         }
         iceRestartAttempts = 0 // Reset on new check
       } else if (state === 'connected' || state === 'completed') {
-        console.log(`ICE connected/completed for ${key}`)
+        console.log(`✅ ICE ${state} for ${key} - Connection established!`)
         if (iceDisconnectTimeout) {
           clearTimeout(iceDisconnectTimeout)
           iceDisconnectTimeout = null
@@ -1735,19 +1746,19 @@ export default function Chat() {
         </div>
         <div className="flex-1 min-w-0 h-full">
           <CenterPanel
-               user={user}
-               socket={socket}
-               typingUsers={typingUsers}
-               setShowMembers={setShowMembers}
-               setInfoMsg={setInfoMsg}
-               refreshMessages={refreshMessages}
-               onStartCall={startCall}
-               selectedMessages={selectedMessages}
-               setSelectedMessages={setSelectedMessages}
-               getDeletedIdsForConv={getDeletedIdsForConv}
-               addDeletedForMe={addDeletedForMe}
-               setEnlargedImage={setEnlargedImage}
-             />
+            user={user}
+            socket={socket}
+            typingUsers={typingUsers}
+            setShowMembers={setShowMembers}
+            setInfoMsg={setInfoMsg}
+            refreshMessages={refreshMessages}
+            onStartCall={startCall}
+            selectedMessages={selectedMessages}
+            setSelectedMessages={setSelectedMessages}
+            getDeletedIdsForConv={getDeletedIdsForConv}
+            addDeletedForMe={addDeletedForMe}
+            setEnlargedImage={setEnlargedImage}
+          />
         </div>
         <div className="w-72 flex-none border-l h-full hidden xl:block">
           <RightPanel user={user} onOpenProfile={() => setProfileOpen(true)} />
@@ -1769,7 +1780,7 @@ export default function Chat() {
 
       {/* Image Lightbox Modal */}
       {enlargedImage && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setEnlargedImage(null)}
         >
@@ -1796,8 +1807,8 @@ export default function Chat() {
               ✕
             </button>
           </div>
-          <img 
-            src={enlargedImage.url} 
+          <img
+            src={enlargedImage.url}
             alt={enlargedImage.name}
             className="max-w-full max-h-[90vh] object-contain rounded-lg"
             onClick={(e) => e.stopPropagation()}
@@ -2136,9 +2147,9 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
       try {
         const res = await fetch(`${API}/api/messages/send`, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}` 
+            Authorization: `Bearer ${token}`
           },
           body: JSON.stringify({
             conversationId: activeId,
@@ -2151,28 +2162,28 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
             replyTo: replyingTo?._id || null
           })
         })
-        
+
         console.log('✅ File message sent with replyTo:', replyingTo?._id || null)
-        
+
         if (!res.ok) {
           const error = await res.json()
           throw new Error(error.error || 'Failed to send message')
         }
-        
+
         const message = await res.json()
-        
+
         // Add to local state (server broadcasts via Socket.IO, but add locally for instant UI)
         pushMessage(activeId, {
           ...message,
           tempId: message.tempId || Math.random().toString(36).slice(2)
         })
-        
+
         setText('')
         setPreviewFile(null)
         setUploadSession(null)
         setUploadProgress(0)
         setReplyingTo(null)
-        
+
         if (socket) {
           socket.emit('stop_typing', { conversationId: activeId })
         }
@@ -2235,13 +2246,13 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    
+
     // Check file size (25MB limit)
     if (file.size > 25 * 1024 * 1024) {
       alert('File size should be less than 25MB')
       return
     }
-    
+
     // Create preview URL
     const fileUrl = URL.createObjectURL(file)
     setPreviewFile({
@@ -2251,17 +2262,17 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
       type: file.type,
       size: file.size
     })
-    
+
     // Step 1: Create upload session (WhatsApp-like flow)
     setIsUploading(true)
     setUploadProgress(0)
-    
+
     try {
       const sessionRes = await fetch(`${API}/api/media/create-upload-session`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` 
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
           fileName: file.name,
@@ -2269,21 +2280,21 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
           fileSize: file.size
         })
       })
-      
+
       if (!sessionRes.ok) {
         const error = await sessionRes.json()
         throw new Error(error.error || 'Failed to create upload session')
       }
-      
+
       const sessionData = await sessionRes.json()
       setUploadSession(sessionData)
-      
+
       // Step 2: Upload file directly to uploadURL
       const formData = new FormData()
       formData.append('file', file)
-      
+
       const xhr = new XMLHttpRequest()
-      
+
       // Track upload progress
       xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
@@ -2291,7 +2302,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
           setUploadProgress(percentComplete)
         }
       })
-      
+
       xhr.onload = () => {
         if (xhr.status === 200) {
           const uploadResult = JSON.parse(xhr.responseText)
@@ -2306,7 +2317,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
           throw new Error('Upload failed')
         }
       }
-      
+
       xhr.onerror = () => {
         alert('Upload failed. Please try again.')
         setIsUploading(false)
@@ -2314,11 +2325,11 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
         setPreviewFile(null)
         setUploadSession(null)
       }
-      
+
       xhr.open('POST', sessionData.uploadURL)
       xhr.setRequestHeader('Authorization', `Bearer ${token}`)
       xhr.send(formData)
-      
+
     } catch (e) {
       console.error('File upload error:', e)
       alert(e.message || 'Failed to upload file. Please try again.')
@@ -2327,11 +2338,11 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
       setPreviewFile(null)
       setUploadSession(null)
     }
-    
+
     // Reset input
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
-  
+
   // Clean up object URL when previewFile changes or component unmounts
   useEffect(() => {
     const currentUrl = previewFile?.url
@@ -2410,21 +2421,21 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                       const mine = msg && String(msg.sender?._id || msg.sender) === String(user._id)
                       return mine
                     })() && (
-                      <button
-            onClick={() => {
-              const msgId = [...selectedMessages][0]
-              const msg = convMessages.find(m => m._id === msgId)
-              setEditingMessageId(msgId)
-              setEditingMessageContent(msg?.content || '')
-              setSelectedMessages(new Set())
-              setShowOptionsMenu(false)
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
-          >
-            <span className="material-icons">edit</span>
-            <span>Edit</span>
-          </button>
-                    )}
+                        <button
+                          onClick={() => {
+                            const msgId = [...selectedMessages][0]
+                            const msg = convMessages.find(m => m._id === msgId)
+                            setEditingMessageId(msgId)
+                            setEditingMessageContent(msg?.content || '')
+                            setSelectedMessages(new Set())
+                            setShowOptionsMenu(false)
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                        >
+                          <span className="material-icons">edit</span>
+                          <span>Edit</span>
+                        </button>
+                      )}
                     <button
                       onClick={async () => {
                         if (selectedMessages.size === 0) return
@@ -2510,10 +2521,10 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                 </div>
               )}
             </div>
-              <div className="flex items-center gap-2 text-gray-400">
-                {conv && (
-                  <>
-                    <div className="relative" data-role="call-menu">
+            <div className="flex items-center gap-2 text-gray-400">
+              {conv && (
+                <>
+                  <div className="relative" data-role="call-menu">
                     <button
                       title="Calls"
                       className="w-9 h-9 rounded-full hover:bg-gray-100 flex items-center justify-center text-base z-50"
@@ -2540,13 +2551,13 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                       </div>
                     )}
                   </div>
-                  </>
-                )}
-                <button
-                  title="Refresh messages"
-                  className="p-2 rounded-lg hover:bg-gray-100"
-                  onClick={refreshMessages}
-                >
+                </>
+              )}
+              <button
+                title="Refresh messages"
+                className="p-2 rounded-lg hover:bg-gray-100"
+                onClick={refreshMessages}
+              >
                 <span className="material-icons">refresh</span>
               </button>
               <div className="relative">
@@ -2718,8 +2729,8 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                 {isUploading && (
                   <div className="mt-2">
                     <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-primary h-2 rounded-full transition-all duration-300" 
+                      <div
+                        className="bg-primary h-2 rounded-full transition-all duration-300"
                         style={{ width: `${uploadProgress}%` }}
                       ></div>
                     </div>
@@ -2730,7 +2741,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                   <div className="text-xs text-green-600 mt-1">✓ Uploaded</div>
                 )}
               </div>
-              <button 
+              <button
                 onClick={() => {
                   URL.revokeObjectURL(previewFile.url)
                   setPreviewFile(null)
@@ -2770,16 +2781,16 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
               <button onClick={() => setReplyingTo(null)} className="text-gray-500 hover:text-gray-700 px-2">✕</button>
             </div>
           )}
-          <input 
-            value={text} 
-            onChange={(e) => onInput(e.target.value)} 
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }} 
-            className="flex-1 rounded-full border-0 bg-sky-50 px-4 py-3" 
-            placeholder={previewFile ? "Add a message (optional)..." : "Say something..."} 
+          <input
+            value={text}
+            onChange={(e) => onInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+            className="flex-1 rounded-full border-0 bg-sky-50 px-4 py-3"
+            placeholder={previewFile ? "Add a message (optional)..." : "Say something..."}
             disabled={isUploading}
           />
-          <button 
-            onClick={handleSend} 
+          <button
+            onClick={handleSend}
             disabled={isUploading || (!text.trim() && (!previewFile || !previewFile.fileId))}
             className="bg-primary text-white px-4 py-3 rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -2811,14 +2822,60 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
   )
 }
 
+const getFileIcon = (type) => {
+  if (type.startsWith('image/')) return '🖼️';
+  if (type.startsWith('video/')) return '🎬';
+  if (type.startsWith('audio/')) return '🎵';
+  if (type.includes('pdf')) return '📄';
+  if (type.includes('word') || type.includes('document')) return '📝';
+  if (type.includes('spreadsheet') || type.includes('excel')) return '📊';
+  if (type.includes('presentation') || type.includes('powerpoint')) return '📑';
+  if (type.includes('zip') || type.includes('compressed')) return '🗜️';
+  return '📎';
+};
+
 function MessageBubble({ m, me, totalMembers, conv, onInfo, selected, onSelect, editingMessageId, editingMessageContent, setEditingMessageContent, handleSaveEdit, handleCancelEdit, setEnlargedImage, setReplyingTo }) {
   const [showHoverButtons, setShowHoverButtons] = useState(false)
+  const [viewingAttachment, setViewingAttachment] = useState(null)
   console.log('MessageBubble props:', { handleSaveEdit, handleCancelEdit });
   const mine = String(m.sender?._id || m.sender) === String(me)
   const senderName = m.sender?.username || (conv?.members || []).find(x => String(x._id) === String(m.sender))?.username || (mine ? 'You' : 'User')
 
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '0 B';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const handleDownload = (e, attachment) => {
+    e.stopPropagation()
+    const link = document.createElement('a')
+    link.href = attachment.url || attachment.fileURL
+    link.download = attachment.name
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    // Close the preview after download if it's open
+    if (viewingAttachment) {
+      setViewingAttachment(null);
+    }
+  }
+
+  const handleAttachmentClick = (e, attachment) => {
+    e.stopPropagation()
+    if (attachment.type.includes('pdf')) {
+      // Open PDFs in a new tab
+      window.open(attachment.url || attachment.fileURL, '_blank')
+    } else {
+      // For other file types, open in the preview modal
+      setViewingAttachment(attachment)
+    }
+  }
+
   return (
-    <div 
+    <div
       className={`flex ${mine ? 'justify-end' : 'justify-start'} group relative items-start gap-2`}
       onMouseEnter={() => setShowHoverButtons(true)}
       onMouseLeave={() => setShowHoverButtons(false)}
@@ -2857,22 +2914,19 @@ function MessageBubble({ m, me, totalMembers, conv, onInfo, selected, onSelect, 
         {m.attachments && m.attachments.length > 0 && (
           <div className="mb-2 space-y-2">
             {m.attachments.map((att, i) => (
-              <div key={i}>
+              <div key={i} className="relative group">
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    const link = document.createElement('a')
-                    link.href = att.url || att.fileURL
-                    link.download = att.name
-                    document.body.appendChild(link)
-                    link.click()
-                    document.body.removeChild(link)
-                  }}
-                  className={`flex items-center gap-2 p-2 rounded text-xs cursor-pointer transition-colors ${mine ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}
-                  title={`Download ${att.name}`}
+                  onClick={(e) => handleAttachmentClick(e, att)}
+                  className={`w-full text-left flex items-center gap-2 p-2 rounded text-xs cursor-pointer transition-colors ${mine ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}
+                  title={`View ${att.name}`}
                 >
-                  {att.type.startsWith('image/') ? <span>🖼️</span> : <span>📎</span>}
-                  <span className="truncate">{att.name}</span>
+                  <span className="w-6 h-6 flex items-center justify-center">
+                    {getFileIcon(att.type)}
+                  </span>
+                  <span className="truncate flex-1">{att.name}</span>
+                  <span className="opacity-0 group-hover:opacity-100 transition-opacity text-xs">
+                    View
+                  </span>
                 </button>
               </div>
             ))}
@@ -2906,20 +2960,98 @@ function MessageBubble({ m, me, totalMembers, conv, onInfo, selected, onSelect, 
           {mine && <StatusIcon m={m} me={me} totalMembers={totalMembers} />}
         </div>
       </div>
-      {!mine && showHoverButtons && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            setReplyingTo(m)
-            setShowHoverButtons(false)
-          }}
-          title="Reply"
-          className="text-gray-400 hover:text-primary flex-shrink-0 mt-1 pointer-events-auto z-10 hover:scale-125 transition-transform"
+
+      {/* Attachment Preview Modal */}
+      {viewingAttachment && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+          onClick={() => setViewingAttachment(null)}
         >
-          <span className="material-icons text-base">reply</span>
-        </button>
+          <div
+            className="relative bg-white rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-4 border-b flex justify-between items-center">
+              <div className="font-medium">{viewingAttachment.name || 'Attachment'}</div>
+              <div className="flex gap-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDownload(e, viewingAttachment);
+                  }}
+                  className="p-2 text-gray-700 hover:text-gray-900"
+                  title="Download"
+                >
+                  <span className="material-icons">download</span>
+                </button>
+                <button
+                  onClick={() => setViewingAttachment(null)}
+                  className="p-2 text-gray-700 hover:text-gray-900"
+                >
+                  <span className="material-icons">close</span>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4 flex items-center justify-center">
+              {viewingAttachment.type.startsWith('image/') ? (
+                <img
+                  src={viewingAttachment.url || viewingAttachment.fileURL}
+                  alt={viewingAttachment.name || 'Image'}
+                  className="max-h-[70vh] max-w-full object-contain"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : viewingAttachment.type.startsWith('video/') ? (
+                <video
+                  src={viewingAttachment.url || viewingAttachment.fileURL}
+                  controls
+                  className="max-h-[70vh] max-w-full"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Your browser does not support the video tag.
+                </video>
+              ) : viewingAttachment.type.startsWith('audio/') ? (
+                <div className="w-full max-w-md p-6">
+                  <div className="flex flex-col items-center gap-4">
+                    <span className="text-6xl">
+                      {getFileIcon(viewingAttachment.type)}
+                    </span>
+                    <div className="text-lg font-medium">{viewingAttachment.name || 'Audio File'}</div>
+                    <audio
+                      src={viewingAttachment.url || viewingAttachment.fileURL}
+                      controls
+                      className="w-full mt-4"
+                    >
+                      Your browser does not support the audio element.
+                    </audio>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center p-8 max-w-md">
+                  <div className="text-6xl mb-4">
+                    {getFileIcon(viewingAttachment.type)}
+                  </div>
+                  <div className="text-lg font-medium mb-2">{viewingAttachment.name || 'File'}</div>
+                  <div className="text-sm text-gray-600 mb-6">
+                    {viewingAttachment.type.split('/').pop().toUpperCase()} • {formatFileSize(viewingAttachment.size)}
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDownload(e, viewingAttachment);
+                    }}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg flex items-center gap-2 mx-auto hover:bg-indigo-700 transition-colors"
+                  >
+                    <span className="material-icons text-sm">download</span>
+                    Download File
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
-      {mine && showHoverButtons && (
+
+      {!mine && showHoverButtons && (
         <button
           onClick={(e) => {
             e.stopPropagation()
