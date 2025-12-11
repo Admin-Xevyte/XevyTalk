@@ -1773,21 +1773,35 @@ export default function Chat() {
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setEnlargedImage(null)}
         >
-          <button
-            onClick={() => setEnlargedImage(null)}
-            className="absolute top-4 right-4 text-white hover:text-gray-300 text-2xl font-bold w-10 h-10 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70"
-          >
-            ✕
-          </button>
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                const link = document.createElement('a')
+                link.href = enlargedImage.url
+                link.download = enlargedImage.name || 'image.png'
+                document.body.appendChild(link)
+                link.click()
+                document.body.removeChild(link)
+              }}
+              title="Download"
+              className="text-white hover:text-gray-300 text-xl flex items-center justify-center w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 cursor-pointer transition"
+            >
+              ⤓
+            </button>
+            <button
+              onClick={() => setEnlargedImage(null)}
+              className="text-white hover:text-gray-300 text-2xl font-bold w-10 h-10 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70"
+            >
+              ✕
+            </button>
+          </div>
           <img 
             src={enlargedImage.url} 
             alt={enlargedImage.name}
             className="max-w-full max-h-[90vh] object-contain rounded-lg"
             onClick={(e) => e.stopPropagation()}
           />
-          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-sm bg-black/50 px-4 py-2 rounded">
-            {enlargedImage.name}
-          </div>
         </div>
       )}
 
@@ -2026,9 +2040,13 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadSession, setUploadSession] = useState(null)
+  const [replyingTo, setReplyingTo] = useState(null)
   const listRef = useRef(null)
   const fileInputRef = useRef(null)
   const selectionHeaderRef = useRef(null)
+  const selOptionsRef = useRef(null)
+  const convOptionsRef = useRef(null)
+  const emojiRef = useRef(null)
   const hiddenIds = activeId ? getDeletedIdsForConv(activeId) : new Set()
   const convMessages = activeId ? ((messages[activeId] || []).filter(m => !hiddenIds.has(String(m._id)))) : []
 
@@ -2071,6 +2089,22 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
     setSelectedMessages(new Set())
   }, [activeId])
 
+  // Close emoji picker and conversation options when clicking outside
+  useEffect(() => {
+    const onDocClick = (e) => {
+      const target = e.target
+      const clickedEmoji = target && target.closest && target.closest('[data-role="emoji-picker"]')
+      const clickedConvOptions = target && target.closest && target.closest('[data-role="conversation-options"]')
+      const clickedCallMenu = target && target.closest && target.closest('[data-role="call-menu"]')
+      const clickedSelectionHeader = selectionHeaderRef.current && selectionHeaderRef.current.contains(target)
+      if (!clickedEmoji) setShowEmoji(false)
+      if (!clickedConvOptions && !clickedSelectionHeader) setShowOptionsMenu(false)
+      if (!clickedCallMenu) setShowCallMenu(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [])
+
   useEffect(() => {
     if (selectedMessages.size === 0) return
     const onDocClick = (e) => {
@@ -2094,6 +2128,8 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
     // Allow sending if there's text OR a file
     if ((!text.trim() && !previewFile) || !activeId) return
 
+    console.log('🔍 handleSend called | replyingTo:', replyingTo, 'replyingTo._id:', replyingTo?._id)
+
     // If there's a file, it should already be uploaded (via handleFileSelect)
     // Now send message metadata via REST API
     if (previewFile && previewFile.fileId) {
@@ -2111,9 +2147,12 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
             fileURL: previewFile.fileURL,
             fileName: previewFile.name,
             fileType: previewFile.type,
-            fileSize: previewFile.size
+            fileSize: previewFile.size,
+            replyTo: replyingTo?._id || null
           })
         })
+        
+        console.log('✅ File message sent with replyTo:', replyingTo?._id || null)
         
         if (!res.ok) {
           const error = await res.json()
@@ -2132,6 +2171,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
         setPreviewFile(null)
         setUploadSession(null)
         setUploadProgress(0)
+        setReplyingTo(null)
         
         if (socket) {
           socket.emit('stop_typing', { conversationId: activeId })
@@ -2149,23 +2189,28 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
         conversation: activeId,
         sender: user,
         content: text.trim(),
+        replyTo: replyingTo?._id || null,
         createdAt: new Date().toISOString(),
         deliveredTo: [],
         seenBy: []
       }
       pushMessage(activeId, msg)
 
+      console.log('📤 Text message send | replyingTo._id:', replyingTo?._id || null)
+
       // Send via WebSocket (text-only)
       if (socket) {
         socket.emit('message_send', {
           conversationId: activeId,
           content: text.trim(),
+          replyTo: replyingTo?._id || null,
           tempId
         })
         socket.emit('stop_typing', { conversationId: activeId })
       }
 
       setText('')
+      setReplyingTo(null)
     } else {
       // File selected but not uploaded yet
       alert('Please wait for file upload to complete')
@@ -2344,7 +2389,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                   <span className="material-icons">more_vert</span>
                 </button>
                 {showOptionsMenu && (
-                  <div className="absolute right-0 mt-1 w-52 bg-white rounded-xl shadow-lg border text-sm z-10">
+                  <div className="absolute right-0 mt-1 w-52 bg-white rounded-xl shadow-lg border text-sm z-50 pointer-events-auto" data-role="conversation-options" ref={selOptionsRef}>
                     {selectedMessages.size === 1 && conv?.type === 'group' && (
                       <button
                         onClick={() => {
@@ -2468,16 +2513,16 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
               <div className="flex items-center gap-2 text-gray-400">
                 {conv && (
                   <>
-                    <div className="relative">
+                    <div className="relative" data-role="call-menu">
                     <button
                       title="Calls"
-                      className="w-9 h-9 rounded-full hover:bg-gray-100 flex items-center justify-center text-base"
+                      className="w-9 h-9 rounded-full hover:bg-gray-100 flex items-center justify-center text-base z-50"
                       onClick={() => setShowCallMenu(v => !v)}
                     >
                       <span className="material-icons">call</span>
                     </button>
                     {showCallMenu && (
-                      <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border text-sm z-10">
+                      <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border text-sm z-50 pointer-events-auto" data-role="call-menu">
                         <button
                           className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
                           onClick={() => { setShowCallMenu(false); onStartCall('video') }}
@@ -2513,7 +2558,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                   <span className="material-icons">more_vert</span>
                 </button>
                 {showOptionsMenu && (
-                  <div className="absolute right-0 mt-1 w-52 bg-white rounded-xl shadow-lg border text-sm z-10">
+                  <div className="absolute right-0 mt-1 w-52 bg-white rounded-xl shadow-lg border text-sm z-50 pointer-events-auto" data-role="conversation-options" ref={convOptionsRef}>
                     {conv?.type === 'direct' ? (
                       // Direct conversation: Delete for current user only
                       <button
@@ -2647,6 +2692,8 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
                   setEditingMessageContent={setEditingMessageContent}
                   handleSaveEdit={handleSaveEdit}
                   handleCancelEdit={handleCancelEdit}
+                  setEnlargedImage={setEnlargedImage}
+                  setReplyingTo={setReplyingTo}
                 />
               </React.Fragment>
             )
@@ -2705,7 +2752,7 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
               <span className="material-icons">emoji_emotions</span>
             </button>
             {showEmoji && (
-              <div className="absolute bottom-12 left-0 z-10">
+              <div className="absolute bottom-12 left-0 z-10" data-role="emoji-picker" ref={emojiRef}>
                 <EmojiPicker onEmojiClick={handleEmojiClick} />
               </div>
             )}
@@ -2714,6 +2761,15 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
             <span className="material-icons">attach_file</span>
           </button>
           <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+          {replyingTo && (
+            <div className="px-4 py-2 bg-sky-50 border-l-4 border-primary rounded flex items-center justify-between">
+              <div className="text-sm">
+                <div className="text-gray-600">Replying to:</div>
+                <div className="text-gray-900 font-medium truncate">{replyingTo.content?.substring(0, 50) || '(file message)'}</div>
+              </div>
+              <button onClick={() => setReplyingTo(null)} className="text-gray-500 hover:text-gray-700 px-2">✕</button>
+            </div>
+          )}
           <input 
             value={text} 
             onChange={(e) => onInput(e.target.value)} 
@@ -2755,18 +2811,46 @@ function CenterPanel({ user, socket, typingUsers, setShowMembers, setInfoMsg, re
   )
 }
 
-function MessageBubble({ m, me, totalMembers, conv, onInfo, selected, onSelect, editingMessageId, editingMessageContent, setEditingMessageContent, handleSaveEdit, handleCancelEdit }) {
+function MessageBubble({ m, me, totalMembers, conv, onInfo, selected, onSelect, editingMessageId, editingMessageContent, setEditingMessageContent, handleSaveEdit, handleCancelEdit, setEnlargedImage, setReplyingTo }) {
+  const [showHoverButtons, setShowHoverButtons] = useState(false)
   console.log('MessageBubble props:', { handleSaveEdit, handleCancelEdit });
   const mine = String(m.sender?._id || m.sender) === String(me)
   const senderName = m.sender?.username || (conv?.members || []).find(x => String(x._id) === String(m.sender))?.username || (mine ? 'You' : 'User')
 
   return (
-    <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+    <div 
+      className={`flex ${mine ? 'justify-end' : 'justify-start'} group relative items-start gap-2`}
+      onMouseEnter={() => setShowHoverButtons(true)}
+      onMouseLeave={() => setShowHoverButtons(false)}
+    >
+      {mine && showHoverButtons && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setReplyingTo(m)
+            setShowHoverButtons(false)
+          }}
+          title="Reply"
+          className="text-gray-400 hover:text-primary flex-shrink-0 mt-1 pointer-events-auto z-10 hover:scale-125 transition-transform"
+        >
+          <span className="material-icons text-base">reply</span>
+        </button>
+      )}
       <div
         onClick={onSelect}
         data-role="message-bubble"
         className={`max-w-[70%] rounded-2xl px-4 py-3 shadow cursor-pointer transition-colors ${selected ? 'ring-2 ring-offset-1 ring-primary' : ''} ${mine ? 'bg-primary text-white rounded-br-sm' : 'bg-white rounded-bl-sm'}`}
       >
+        {m.replyTo && (
+          <div className={`mb-2 pb-2 border-l-2 pl-2 ${mine ? 'border-white/40 opacity-80' : 'border-primary/40'}`}>
+            <div className={`text-xs font-medium ${mine ? 'text-white/90' : 'text-gray-600'}`}>
+              {m.replyTo?.sender?.username || 'User'}
+            </div>
+            <div className={`text-xs line-clamp-2 ${mine ? 'text-white/80' : 'text-gray-700'}`}>
+              {m.replyTo?.content || '(file message)'}
+            </div>
+          </div>
+        )}
         {conv?.type === 'group' && (
           <div className={`text-[11px] mb-1 ${mine ? 'text-white/90' : 'text-gray-700'}`}>{senderName}</div>
         )}
@@ -2774,19 +2858,22 @@ function MessageBubble({ m, me, totalMembers, conv, onInfo, selected, onSelect, 
           <div className="mb-2 space-y-2">
             {m.attachments.map((att, i) => (
               <div key={i}>
-                {att.type.startsWith('image/') ? (
-                  <img 
-                    src={att.url || att.fileURL} 
-                    alt={att.name} 
-                    className="max-w-full rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                    onClick={() => setEnlargedImage({ url: att.url || att.fileURL, name: att.name })}
-                  />
-                ) : (
-                  <a href={att.url || att.fileURL} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 p-2 rounded text-xs ${mine ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-700'}`}>
-                    <span>📎</span>
-                    <span>{att.name}</span>
-                  </a>
-                )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const link = document.createElement('a')
+                    link.href = att.url || att.fileURL
+                    link.download = att.name
+                    document.body.appendChild(link)
+                    link.click()
+                    document.body.removeChild(link)
+                  }}
+                  className={`flex items-center gap-2 p-2 rounded text-xs cursor-pointer transition-colors ${mine ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}
+                  title={`Download ${att.name}`}
+                >
+                  {att.type.startsWith('image/') ? <span>🖼️</span> : <span>📎</span>}
+                  <span className="truncate">{att.name}</span>
+                </button>
               </div>
             ))}
           </div>
@@ -2819,6 +2906,32 @@ function MessageBubble({ m, me, totalMembers, conv, onInfo, selected, onSelect, 
           {mine && <StatusIcon m={m} me={me} totalMembers={totalMembers} />}
         </div>
       </div>
+      {!mine && showHoverButtons && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setReplyingTo(m)
+            setShowHoverButtons(false)
+          }}
+          title="Reply"
+          className="text-gray-400 hover:text-primary flex-shrink-0 mt-1 pointer-events-auto z-10 hover:scale-125 transition-transform"
+        >
+          <span className="material-icons text-base">reply</span>
+        </button>
+      )}
+      {mine && showHoverButtons && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setReplyingTo(m)
+            setShowHoverButtons(false)
+          }}
+          title="Reply"
+          className="text-gray-400 hover:text-primary flex-shrink-0 mt-1 pointer-events-auto z-10 hover:scale-125 transition-transform"
+        >
+          <span className="material-icons text-base">reply</span>
+        </button>
+      )}
     </div>
   )
 }

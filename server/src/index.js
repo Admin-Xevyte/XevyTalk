@@ -146,6 +146,33 @@ const decryptText = (packed = '') => {
   }
 };
 
+// File encryption helpers using AES-256-GCM
+const encryptFileBuffer = (fileBuffer) => {
+  try {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv(ENC_ALGO, ENC_KEY, iv);
+    const encrypted = Buffer.concat([cipher.update(fileBuffer), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    // Return { iv, tag, encrypted } - these will be stored with metadata
+    return { iv, tag, encrypted };
+  } catch (e) {
+    console.error('File encryption error:', e.message);
+    throw e;
+  }
+};
+
+const decryptFileBuffer = (iv, tag, encryptedBuffer) => {
+  try {
+    const decipher = crypto.createDecipheriv(ENC_ALGO, ENC_KEY, iv);
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(encryptedBuffer), decipher.final()]);
+    return decrypted;
+  } catch (e) {
+    console.error('File decryption error:', e.message);
+    throw e;
+  }
+};
+
 // Email configuration
 const emailTransporter = nodemailer.createTransport({
   service: 'gmail',
@@ -297,6 +324,7 @@ const messageSchema = new mongoose.Schema({
   tempId: { type: String },
   attachments: [attachmentSchema],
   editedAt: { type: Date },
+  replyTo: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null }
 }, { timestamps: true });
 
 // Upload session schema for temporary upload tracking
@@ -325,6 +353,11 @@ const toSafeMessage = (m, req = null) => {
   if (obj.contentEnc) {
     const decrypted = decryptText(obj.contentEnc);
     if (decrypted) obj.content = decrypted;
+  }
+  // Decrypt nested replyTo message content if present
+  if (obj.replyTo && obj.replyTo.contentEnc) {
+    const decrypted = decryptText(obj.replyTo.contentEnc);
+    if (decrypted) obj.replyTo.content = decrypted;
   }
   // Add URLs to attachments if they exist
   if (obj.attachments && obj.attachments.length > 0) {
@@ -568,8 +601,12 @@ app.post('/api/media/upload/:sessionId', auth, upload.single('file'), async (req
       return res.status(400).json({ error: 'File does not match session parameters' });
     }
 
-    // Upload to GridFS
+    // Upload to GridFS with encryption
     const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}-${session.fileName}`;
+    
+    // Encrypt file buffer before uploading
+    const { iv, tag, encrypted } = encryptFileBuffer(req.file.buffer);
+    
     const uploadStream = gridFSBucket.openUploadStream(filename, {
       contentType: session.fileType,
       metadata: {
@@ -577,7 +614,10 @@ app.post('/api/media/upload/:sessionId', auth, upload.single('file'), async (req
         mimeType: session.fileType,
         uploadedBy: String(req.user._id),
         uploadedAt: new Date(),
-        sessionId: sessionId
+        sessionId: sessionId,
+        encryptionIV: iv.toString('base64'),
+        encryptionTag: tag.toString('base64'),
+        encrypted: true
       }
     });
 
@@ -621,7 +661,7 @@ app.post('/api/media/upload/:sessionId', auth, upload.single('file'), async (req
         reject(error);
       });
 
-      uploadStream.end(req.file.buffer);
+      uploadStream.end(encrypted);
     });
   } catch (error) {
     console.error('Upload error:', error);
@@ -634,7 +674,7 @@ app.post('/api/media/upload/:sessionId', auth, upload.single('file'), async (req
 // Step 3: Send message with file metadata (no file content)
 app.post('/api/messages/send', auth, async (req, res) => {
   try {
-    const { conversationId, messageText, fileId, fileURL, fileName, fileType, fileSize, thumbnailURL } = req.body;
+    const { conversationId, messageText, fileId, fileURL, fileName, fileType, fileSize, thumbnailURL, replyTo } = req.body;
 
     if (!conversationId) {
       return res.status(400).json({ error: 'conversationId is required' });
@@ -709,7 +749,8 @@ app.post('/api/messages/send', auth, async (req, res) => {
       sender: req.user._id,
       contentEnc: encContent,
       tempId,
-      attachments: cleanAttachments
+      attachments: cleanAttachments,
+      replyTo: replyTo || null
     });
 
     try {
@@ -727,7 +768,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
     });
 
     // Populate and send response
-    const populated = await Message.findById(msg._id).populate('sender');
+    const populated = await Message.findById(msg._id).populate('sender').populate('replyTo');
     const safe = toSafeMessage(populated, req);
 
     // Broadcast via Socket.IO (metadata only, no file content)
@@ -740,7 +781,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
   }
 });
 
-// Download file from MongoDB GridFS
+// Download file from MongoDB GridFS (decrypt if encrypted)
 app.get('/api/files/:fileId', async (req, res) => {
   if (!gridFSBucket) {
     return res.status(500).json({ error: 'File storage not initialized' });
@@ -765,21 +806,60 @@ app.get('/api/files/:fileId', async (req, res) => {
 
     const file = files[0];
     const downloadStream = gridFSBucket.openDownloadStream(objectId);
-
-    // Set appropriate headers
-    res.set('Content-Type', file.metadata?.mimeType || 'application/octet-stream');
-    res.set('Content-Disposition', `inline; filename="${encodeURIComponent(file.metadata?.originalName || file.filename)}"`);
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
-
-    downloadStream.pipe(res);
-
-    downloadStream.on('error', (error) => {
-      console.error('GridFS download error:', error);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to download file' });
+    
+    // Handle encrypted files
+    if (file.metadata?.encrypted) {
+      try {
+        // Collect encrypted data from stream
+        const chunks = [];
+        downloadStream.on('data', chunk => chunks.push(chunk));
+        
+        downloadStream.on('end', () => {
+          try {
+            const encryptedBuffer = Buffer.concat(chunks);
+            const iv = Buffer.from(file.metadata.encryptionIV, 'base64');
+            const tag = Buffer.from(file.metadata.encryptionTag, 'base64');
+            
+            // Decrypt file
+            const decryptedBuffer = decryptFileBuffer(iv, tag, encryptedBuffer);
+            
+            // Send decrypted file
+            res.set('Content-Type', file.metadata?.mimeType || 'application/octet-stream');
+            res.set('Content-Disposition', `attachment; filename="${encodeURIComponent(file.metadata?.originalName || file.filename)}"`);
+            res.set('Content-Length', decryptedBuffer.length);
+            res.send(decryptedBuffer);
+          } catch (decryptError) {
+            console.error('Decryption error:', decryptError);
+            res.status(500).json({ error: 'Failed to decrypt file' });
+          }
+        });
+        
+        downloadStream.on('error', (error) => {
+          console.error('Stream error during decryption:', error);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to read file' });
+          }
+        });
+      } catch (error) {
+        console.error('Encryption metadata error:', error);
+        res.status(500).json({ error: 'Failed to process encrypted file' });
       }
-    });
+    } else {
+      // Unencrypted files (legacy support)
+      res.set('Content-Type', file.metadata?.mimeType || 'application/octet-stream');
+      res.set('Content-Disposition', `attachment; filename="${encodeURIComponent(file.metadata?.originalName || file.filename)}"`);
+      res.set('Access-Control-Allow-Origin', '*');
+      res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+
+      downloadStream.pipe(res);
+
+      downloadStream.on('error', (error) => {
+        console.error('GridFS download error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to download file' });
+        }
+      });
+    }
   } catch (error) {
     console.error('Download error:', error);
     if (!res.headersSent) {
@@ -996,7 +1076,8 @@ app.get('/api/messages/:conversationId', auth, async (req, res) => {
   const { conversationId } = req.params;
     const messages = await Message.find({ conversation: conversationId })
     .sort({ createdAt: 1 })
-    .populate('sender');
+    .populate('sender')
+    .populate('replyTo');
     // Decrypt content and add attachment URLs
     const safeMessages = messages.map(m => toSafeMessage(m, req));
   // Filter out messages with no content and no attachments
@@ -1299,7 +1380,7 @@ io.on('connection', (socket) => {
 
   // Socket.IO message_send - ONLY for text messages or already-uploaded file metadata
   // File uploads MUST use REST API /api/messages/send after uploading via /api/media/upload/:sessionId
-  socket.on('message_send', async ({ conversationId, content, tempId, attachments }) => {
+  socket.on('message_send', async ({ conversationId, content, tempId, attachments, replyTo }) => {
     // Only allow text-only messages via WebSocket
     // File attachments must be sent via REST API after upload
     if (!content && (!attachments || attachments.length === 0)) return;
@@ -1335,7 +1416,8 @@ io.on('connection', (socket) => {
       sender: user._id,
       contentEnc: encContent,
       tempId,
-      attachments: parsedAttachments
+      attachments: parsedAttachments,
+      replyTo: replyTo || null
     });
     await msg.save();
 
@@ -1344,7 +1426,7 @@ io.on('connection', (socket) => {
       hiddenFor: []
     });
 
-    const populated = await Message.findById(msg._id).populate('sender');
+    const populated = await Message.findById(msg._id).populate('sender').populate('replyTo');
     
     // Generate URLs for attachments (metadata only)
     const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
