@@ -1408,10 +1408,13 @@ export default function Chat() {
     if (currentCall && socketRef.current) {
       try {
         const conv = conversations.find(c => c._id === currentCall.conversationId);
-      if (conv && conv.type === 'group') {
-        socketRef.current.emit('call_leave', { callId: currentCall.callId, conversationId: currentCall.conversationId })
-      } else {
-        socketRef.current.emit('call_end', { callId: currentCall.callId, conversationId: currentCall.conversationId })
+        if (conv && conv.type === 'group') {
+          socketRef.current.emit('call_leave', { callId: currentCall.callId, conversationId: currentCall.conversationId })
+        } else {
+          socketRef.current.emit('call_end', { callId: currentCall.callId, conversationId: currentCall.conversationId })
+        }
+      } catch (e) {
+        console.error('Error ending call:', e);
       }
     }
     cleanupCall()
